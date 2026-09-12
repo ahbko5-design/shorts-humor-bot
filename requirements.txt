@@ -1,7 +1,7 @@
-google-genai
-requests
+Pillow==9.5.0
+moviepy
 edge-tts
-moviepy==1.0.3
+google-genai
 google-api-python-client
 google-auth-oauthlib
-google-auth-httplib2
+requests
