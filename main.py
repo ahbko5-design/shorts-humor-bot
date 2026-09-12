@@ -7,7 +7,8 @@ import textwrap
 import requests
 from google import genai
 import edge_tts
-from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
+from PIL import Image, ImageDraw, ImageFont
+from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
@@ -22,6 +23,7 @@ if not os.path.exists('token.json'):
         f.write(os.getenv('YOUTUBE_TOKEN', ''))
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
 HUMOR_TOPICS = [
     "junior dev deleting production database", 
@@ -50,7 +52,7 @@ def get_script():
     Return ONLY a JSON object:
     {{
       "text": "The full spoken text of the video without markdown or emojis",
-      "image_prompt": "A funny detailed meme visual, highly detailed 3D render style, vertical 9:16 composition. Example: A fluffy cat wearing a yellow hoodie looking shocked at a laptop screen with red error code",
+      "image_query": "funny cat computer OR stressed programmer OR disaster face OR shocked face OR hacker",
       "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
       "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
@@ -76,74 +78,78 @@ async def create_audio(text):
     communicate = edge_tts.Communicate(text, voice, rate="+15%", pitch="+5Hz")
     await communicate.save("audio.mp3")
 
-def generate_ai_image(image_prompt):
-    client = genai.Client(api_key=GEMINI_API_KEY)
+def download_pexels_image(query):
+    headers = {"Authorization": PEXELS_API_KEY}
+    random_page = random.randint(1, 3)
+    url = f"https://api.pexels.com/v1/search?query={query}&per_page=15&page={random_page}&orientation=portrait"
+    res = requests.get(url, headers=headers).json()
     
-    try:
-        # Попытка 1: Imagen 3
-        result = client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=image_prompt + ", 9:16 vertical aspect ratio, full screen",
-            config=dict(
-                number_of_images=1,
-                output_mime_type="image/jpeg",
-                aspect_ratio="9:16"
-            )
-        )
-        for generated_image in result.generated_images:
-            with open("meme_bg.jpg", "wb") as f:
-                f.write(generated_image.image.image_bytes)
-            print("🎨 Изображение сгенерировано через Imagen 3!")
-            return
-    except Exception as e:
-        print(f"⚠️ Ошибка Imagen 3: {e}. Переходим на резервный генератор...")
-        
-        # Резервный источник ИИ-картинок (Pollinations AI)
-        encoded_prompt = requests.utils.quote(image_prompt + " vertical 9:16 meme high quality")
-        fallback_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=true"
-        img_data = requests.get(fallback_url).content
-        with open("meme_bg.jpg", "wb") as f:
-            f.write(img_data)
-        print("🎨 Изображение сгенерировано через резервный API!")
+    photos = res.get("photos", [])
+    if not photos:
+        res = requests.get("https://api.pexels.com/v1/search?query=programmer&per_page=10&orientation=portrait", headers=headers).json()
+        photos = res.get("photos", [])
+
+    selected = random.choice(photos)
+    image_url = selected["src"]["large2x"]
+    
+    with open("meme_bg.jpg", "wb") as f:
+        f.write(requests.get(image_url).content)
+    print("📸 Мемная картинка успешно загружена!")
 
 def build_video(script_text):
     audio = AudioFileClip("audio.mp3")
     duration = audio.duration
-
-    img_clip = ImageClip("meme_bg.jpg").set_duration(duration)
-    img_w, img_h = img_clip.size
     target_w, target_h = 1080, 1920
+
+    # 1. Загружаем картинку и делаем идеальный вертикальный холст 9:16 без растягивания
+    img = Image.open("meme_bg.jpg").convert("RGB")
+    img_w, img_h = img.size
     
     scale = max(target_w / img_w, target_h / img_h)
     new_w, new_h = int(img_w * scale), int(img_h * scale)
     
-    img_resized = img_clip.resize((new_w, new_h))
-    img_cropped = img_resized.crop(x_center=new_w/2, y_center=new_h/2, width=target_w, height=target_h)
+    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    
+    background = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    left = (target_w - new_w) // 2
+    top = (target_h - new_h) // 2
+    background.paste(img, (left, top))
 
-    img_animated = img_cropped.resize(lambda t: 1 + 0.04 * t).set_position(('center', 'center'))
-    wrapped_text = "\n".join(textwrap.wrap(script_text, width=25))
-
+    # 2. Рендерим текст поверх вертикального кадра через PIL
+    draw = ImageDraw.Draw(background)
+    
     try:
-        txt_clip = (TextClip(
-                        txt=wrapped_text, 
-                        fontsize=48, 
-                        color='yellow', 
-                        font='DejaVu-Sans-Bold',
-                        stroke_color='black',
-                        stroke_width=4,
-                        method='caption',
-                        align='center',
-                        size=(900, None)
-                    )
-                    .set_position(('center', 0.30), relative=True) 
-                    .set_duration(duration))
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 55)
+    except:
+        font = ImageFont.load_default()
 
-        final_clip = CompositeVideoClip([img_animated, txt_clip], size=(target_w, target_h))
-    except Exception as e:
-        print(f"⚠️ Ошибка субтитров: {e}. Монтируем без текста.")
-        final_clip = CompositeVideoClip([img_animated], size=(target_w, target_h))
+    wrapped_lines = textwrap.wrap(script_text, width=22)
+    line_height = 75
+    y_text = int(target_h * 0.25)
 
+    for line in wrapped_lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w = bbox[2] - bbox[0]
+        x = (target_w - w) / 2
+        
+        # Черная обводка для читаемости текста
+        for adj in [(-3,0), (3,0), (0,-3), (0,3), (-3,-3), (3,3), (-3,3), (3,-3)]:
+            draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
+        
+        # Основной желтый текст
+        draw.text((x, y_text), line, font=font, fill="yellow")
+        y_text += line_height
+
+    final_frame_path = "final_frame.jpg"
+    background.save(final_frame_path)
+
+    # 3. Собираем видео с анимацией Zoom-In
+    img_clip = ImageClip(final_frame_path).set_duration(duration)
+    img_animated = img_clip.resize(lambda t: 1 + 0.04 * t).set_position(('center', 'center'))
+
+    final_clip = CompositeVideoClip([img_animated], size=(target_w, target_h))
     final_clip = final_clip.set_audio(audio)
+    
     final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     audio.close()
 
@@ -180,9 +186,9 @@ if __name__ == "__main__":
     data = get_script()
     print("2. Озвучиваем текст...")
     asyncio.run(create_audio(data['text']))
-    print("3. Генерируем ИИ-мем в формате 9:16...")
-    generate_ai_image(data['image_prompt'])
-    print("4. Собираем ролик...")
+    print("3. Скачиваем картинку...")
+    download_pexels_image(data['image_query'])
+    print("4. Собираем вертикальный ролик с текстом и зумом...")
     build_video(data['text'])
     print("5. Публикуем на YouTube...")
     upload_to_youtube(data)
