@@ -49,7 +49,7 @@ def get_script():
     Return ONLY a JSON object:
     {{
       "text": "The full spoken text of the video without markdown or emojis",
-      "image_prompt": "A funny detailed meme visual, highly detailed 3D render or cinematic style, vertical 9:16 composition. Example: A cute fluffy cat wearing a yellow hoodie looking shocked at a computer screen showing red crash code",
+      "image_prompt": "A funny detailed meme visual, highly detailed 3D render style, vertical 9:16 composition. Example: A fluffy cat wearing a yellow hoodie looking shocked at a laptop screen with red error code",
       "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
       "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
@@ -62,5 +62,11 @@ def get_script():
                 contents=prompt
             )
             raw_text = response.text.strip()
-            if "```" in raw_text:
-                raw_text = raw_text.split("
+            # Очистка markdown-тегов без синтаксических ошибок
+            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+            return json.loads(raw_text)
+        except Exception as e:
+            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 сек...")
+            time.sleep(15)
+            
+    raise Exception("❌ Ошибка при генерации через Gemini.")
