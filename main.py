@@ -1,23 +1,27 @@
 import os
+import re
 import json
 import time
 import random
-import requests
 import asyncio
+import textwrap
+import requests
 from google import genai
 import edge_tts
-from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip, CompositeAudioClip
+from PIL import Image, ImageDraw, ImageFont
+from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
+# Восстановление секретов
 if not os.path.exists('client_secret.json'):
     with open('client_secret.json', 'w') as f:
-        f.write(os.getenv('CLIENT_SECRET_JSON'))
+        f.write(os.getenv('CLIENT_SECRET_JSON', ''))
 
 if not os.path.exists('token.json'):
     with open('token.json', 'w') as f:
-        f.write(os.getenv('YOUTUBE_TOKEN'))
+        f.write(os.getenv('YOUTUBE_TOKEN', ''))
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
@@ -27,6 +31,28 @@ HUMOR_TOPICS = [
     "senior dev code review feedback", "trying to center a div with CSS",
     "deploying unverified code on Friday 5 PM", "StackOverflow answer from 2011",
     "client asking for a quick small change", "AI writing code with confidence"
+]
+
+# Резервные сценарии на случай полного исчерпания суточной квоты Gemini
+FALLBACK_SCRIPTS = [
+    {
+        "text": "When you fix a typo and production goes down immediately.",
+        "image_query": "stressed programmer computer",
+        "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
+        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
+    },
+    {
+        "text": "Deploying unverified code on Friday at 5 PM. What could possibly go wrong?",
+        "image_query": "funny cat laptop shock",
+        "title": "Friday Deployment Be Like... 💀 #shorts #ithumor #tech #programming",
+        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
+    },
+    {
+        "text": "One bug fixed, ten new features created for the QA team.",
+        "image_query": "programmer disaster face",
+        "title": "Bug Fixing Logic... 💀 #shorts #ithumor #tech #programming",
+        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
+    }
 ]
 
 def get_script():
@@ -53,13 +79,20 @@ def get_script():
                 model='gemini-2.5-flash',
                 contents=prompt
             )
-            clean_json = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_json)
+            raw = response.text
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            return json.loads(raw[start:end])
         except Exception as e:
-            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 сек...")
-            time.sleep(15)
+            err_msg = str(e)
+            # Вытягиваем точное время ожидания от Google (например, retryDelay: '42s')
+            match = re.search(r"retryDelay': '(\d+)s'", err_msg)
+            wait_time = int(match.group(1)) + 2 if match else 35
+            print(f"⚠️ Ошибка Gemini (429/Квота). Попытка {attempt + 1}/5. Ждём {wait_time} сек...")
+            time.sleep(wait_time)
             
-    raise Exception("❌ Ошибка от Gemini.")
+    print("⚠️ Квота Gemini исчерпана. Используем резервный IT-мем...")
+    return random.choice(FALLBACK_SCRIPTS)
 
 async def create_audio(text):
     communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural")
@@ -84,39 +117,54 @@ def download_pexels_image(query):
 def build_video(script_text):
     audio = AudioFileClip("audio.mp3")
     duration = audio.duration
+    target_w, target_h = 1080, 1920
 
-    # Создаем клип из картинки с плавной анимацией приближения (Zoom In)
-    img_clip = ImageClip("meme_bg.jpg").set_duration(duration)
-    
-    # Эффект плавного Zoom-In
-    img_animated = img_clip.resize(lambda t: 1 + 0.04 * t)
-    
-    # Позиционируем по центру
-    img_animated = img_animated.set_position(('center', 'center'))
+    # Пропорциональный Crop-to-Fill в PIL (заполняем 9:16 без растяжения)
+    img = Image.open("meme_bg.jpg").convert("RGB")
+    orig_w, orig_h = img.size
 
-    # Выразительные желтые субтитры по центру
+    scale = max(target_w / orig_w, target_h / orig_h)
+    new_w, new_h = int(orig_w * scale), int(orig_h * scale)
+    img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    left = (new_w - target_w) // 2
+    top = (new_h - target_h) // 2
+    bg_canvas = img_resized.crop((left, top, left + target_w, top + target_h))
+
+    # Рендерим субтитры прямо на картинке через PIL
+    draw = ImageDraw.Draw(bg_canvas)
     try:
-        txt_clip = (TextClip(
-                        txt=script_text, 
-                        fontsize=40, 
-                        color='yellow', 
-                        font='DejaVu-Sans-Bold',
-                        stroke_color='black',
-                        stroke_width=3,
-                        method='caption',
-                        size=(int(1080 * 0.85), None)
-                    )
-                    .set_position(('center', 'center'))
-                    .set_duration(duration))
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
+    except:
+        font = ImageFont.load_default()
 
-        final_clip = CompositeVideoClip([img_animated, txt_clip], size=(1080, 1920))
-    except Exception as e:
-        print(f"⚠️ Ошибка субтитров: {e}")
-        final_clip = CompositeVideoClip([img_animated], size=(1080, 1920))
+    wrapped_lines = textwrap.wrap(script_text, width=22)
+    line_height = 70
+    y_text = int(target_h * 0.32)
 
+    for line in wrapped_lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w = bbox[2] - bbox[0]
+        x = (target_w - w) / 2
+
+        # Чёрная обводка
+        for adj in [(-3,0), (3,0), (0,-3), (0,3), (-3,-3), (3,3), (-3,3), (3,-3)]:
+            draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
+
+        # Жёлтый текст
+        draw.text((x, y_text), line, font=font, fill="yellow")
+        y_text += line_height
+
+    bg_canvas.save("final_frame.jpg")
+
+    # Анимация Zoom-In и сборка
+    img_clip = ImageClip("final_frame.jpg").set_duration(duration)
+    img_animated = img_clip.resize(lambda t: 1 + 0.04 * t).set_position(('center', 'center'))
+
+    final_clip = CompositeVideoClip([img_animated], size=(target_w, target_h))
     final_clip = final_clip.set_audio(audio)
-    final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     
+    final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     audio.close()
 
 def upload_to_youtube(metadata):
