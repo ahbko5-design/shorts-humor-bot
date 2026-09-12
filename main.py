@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import random
@@ -34,6 +35,21 @@ HUMOR_TOPICS = [
     "AI writing code with full confidence"
 ]
 
+FALLBACK_SCRIPTS = [
+    {
+        "text": "Fixed one bug in production, created ten brand new features for the QA team. You are welcome! Subscribe to Tech Humor Lab for daily IT laughs!",
+        "image_prompt": "3D Pixar animation style, stressed funny 3D programmer character facepalm at glowing laptop screen, red error lights",
+        "title": "One Bug Fixed, Ten Born... 💀 #shorts #ithumor #tech #programming",
+        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
+    },
+    {
+        "text": "Deploying code on Friday at five PM without testing. What could possibly go wrong? Subscribe to Tech Humor Lab for daily IT laughs!",
+        "image_prompt": "3D Pixar animation style, cute 3D cat programmer wearing hoodie panicking near burning server room",
+        "title": "Friday Deployment Be Like... 💀 #shorts #ithumor #tech #programming",
+        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
+    }
+]
+
 def get_script():
     client = genai.Client(api_key=GEMINI_API_KEY)
     selected_topic = random.choice(HUMOR_TOPICS)
@@ -67,10 +83,14 @@ def get_script():
             json_str = raw[start:end]
             return json.loads(json_str)
         except Exception as e:
-            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 35 сек...")
-            time.sleep(35)
+            err_msg = str(e)
+            match = re.search(r"retryDelay': '(\d+)s'", err_msg)
+            wait_time = int(match.group(1)) + 2 if match else 40
+            print(f"⚠️ Лимит Gemini (429). Попытка {attempt + 1}/5. Ждём {wait_time} сек...")
+            time.sleep(wait_time)
             
-    raise Exception("❌ Ошибка при генерации через Gemini.")
+    print("⚠️ Лимиты API исчерпаны. Запускаем резервный готовый мем...")
+    return random.choice(FALLBACK_SCRIPTS)
 
 async def create_audio(text):
     voice = "en-US-EricNeural" 
@@ -91,7 +111,6 @@ def build_video(script_text):
     total_duration = audio.duration
     target_w, target_h = 1080, 1920
 
-    # 1. Точный Crop-to-Fill в PIL без искажения пропорций
     img = Image.open("meme_bg.jpg").convert("RGB")
     orig_w, orig_h = img.size
 
@@ -105,7 +124,6 @@ def build_video(script_text):
     top = (new_h - target_h) // 2
     bg_canvas = img_resized.crop((left, top, left + target_w, top + target_h))
 
-    # 2. Нарезка текста на короткие порции
     words = script_text.split()
     chunks = []
     current_chunk = []
@@ -149,7 +167,6 @@ def build_video(script_text):
         c = ImageClip(frame_path).set_duration(chunk_duration)
         clips.append(c)
 
-    # 3. Сборка видеоряда и анимация Zoom-In
     final_visual = concatenate_videoclips(clips, method="compose")
     final_animated = final_visual.resize(lambda t: 1 + 0.04 * (t / total_duration))
     
