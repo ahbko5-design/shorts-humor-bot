@@ -8,7 +8,7 @@ import requests
 from google import genai
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeAudioClip, AudioClip
+from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
@@ -92,16 +92,6 @@ def generate_scene_images(scenes):
     print("🎨 Набор Pixar-картинок с животными сгенерирован!")
     return image_paths
 
-def generate_background_music(duration):
-    def make_frame(t):
-        import math
-        freq = 110.0 if (int(t * 4) % 2 == 0) else 146.83
-        val = math.sin(2 * math.pi * freq * t) * 0.05
-        return [val, val]
-
-    bg_music = AudioClip(make_frame, duration=duration, fps=22050)
-    return bg_music
-
 def build_video(script_text, scenes_prompts):
     audio = AudioFileClip("audio.mp3")
     total_duration = audio.duration
@@ -143,6 +133,7 @@ def build_video(script_text, scenes_prompts):
         draw = ImageDraw.Draw(frame_img)
         wrapped = textwrap.wrap(chunk, width=18)
         
+        # Текст ниже середины, но не у самого низа (55% высоты)
         y_text = int(target_h * 0.55)
         
         for line in wrapped:
@@ -165,11 +156,8 @@ def build_video(script_text, scenes_prompts):
 
     final_visual = concatenate_videoclips(clips, method="compose")
     
-    bg_music = generate_background_music(total_duration)
-    # Используем volumex вместо несуществующего volumethrough
-    final_audio = CompositeAudioClip([audio, bg_music.volumex(0.2)])
-    
-    final_clip = final_visual.set_audio(final_audio)
+    # Используем чистую и стабильную озвучку без проблемных синусоид
+    final_clip = final_visual.set_audio(audio)
     final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     audio.close()
 
