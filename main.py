@@ -6,7 +6,16 @@ import requests
 import asyncio
 from google import genai
 import edge_tts
-from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
+
+# Импорт MoviePy с поддержкой разборчивых версий
+try:
+    from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
+except ImportError:
+    from moviepy.video.VideoClip import ImageClip
+    from moviepy.audio.io.AudioFileClip import AudioFileClip
+    from moviepy.video.VideoClip import TextClip
+    from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
@@ -104,7 +113,7 @@ def build_video(script_text):
     img_clip = ImageClip("meme_bg.jpg").set_duration(duration)
     img_animated = img_clip.resize(lambda t: 1 + 0.04 * t).set_position(('center', 'center'))
 
-    # Накладываем желтые субтитры по центру
+    # Накладываем субтитры
     try:
         txt_clip = (TextClip(
                         txt=script_text, 
