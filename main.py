@@ -6,12 +6,11 @@ import requests
 import asyncio
 from google import genai
 import edge_tts
-from moviepy.editor import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip
+from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip, CompositeAudioClip
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
-# Восстановление секретов
 if not os.path.exists('client_secret.json'):
     with open('client_secret.json', 'w') as f:
         f.write(os.getenv('CLIENT_SECRET_JSON'))
@@ -23,32 +22,28 @@ if not os.path.exists('token.json'):
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
-STOIC_TOPICS = [
-    "control what you can, ignore the rest", "embracing hardship and pain", 
-    "the shortness of life (memento mori)", "staying calm under pressure", 
-    "mastering your emotions", "disregarding the opinions of others", 
-    "finding peace in solitude", "daily discipline over motivation"
+HUMOR_TOPICS = [
+    "junior dev deleting production database", "fixing bug creates 10 new bugs",
+    "senior dev code review feedback", "trying to center a div with CSS",
+    "deploying unverified code on Friday 5 PM", "StackOverflow answer from 2011",
+    "client asking for a quick small change", "AI writing code with confidence"
 ]
 
 def get_script():
     client = genai.Client(api_key=GEMINI_API_KEY)
-    selected_topic = random.choice(STOIC_TOPICS)
+    selected_topic = random.choice(HUMOR_TOPICS)
     
     prompt = f"""
-    Write a UNIQUE 20-second powerful Stoic lesson.
+    Write a hilarious, relatable IT meme script.
     TOPIC: {selected_topic}.
-    Random seed number: {random.randint(1000, 9999)}
-    
-    Voiceover guidelines:
-    - Deep, impactful, philosophical text.
-    - END WITH: "Subscribe to Daily Stoic Mindset for your daily dose of wisdom."
+    Random seed: {random.randint(1000, 9999)}
     
     Return ONLY a JSON object:
     {{
-      "text": "The full spoken text of the video without markdown or emojis",
-      "query": "single search keyword for stock video like statue, dark nature, mountain, fog, rain",
-      "title": "Stoic Rule for Hard Times 🏛️ #shorts #stoicism #wisdom",
-      "tags": ["Stoicism", "Philosophy", "Wisdom", "Mindset", "Shorts"]
+      "text": "When you fix a typo and production goes down immediately.",
+      "image_query": "funny cat computer OR stressed programmer OR disaster face",
+      "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
+      "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
     """
     
@@ -61,66 +56,68 @@ def get_script():
             clean_json = response.text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_json)
         except Exception as e:
-            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 секунд...")
+            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 сек...")
             time.sleep(15)
             
-    raise Exception("❌ Не удалось получить ответ от Gemini.")
+    raise Exception("❌ Ошибка от Gemini.")
 
 async def create_audio(text):
-    communicate = edge_tts.Communicate(text, "en-US-EricNeural")
+    communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural")
     await communicate.save("audio.mp3")
 
-def download_pexels_video(query):
+def download_pexels_image(query):
     headers = {"Authorization": PEXELS_API_KEY}
-    random_page = random.randint(1, 5)
-    url = f"https://api.pexels.com/videos/search?query={query}&per_page=15&page={random_page}&orientation=portrait"
+    url = f"https://api.pexels.com/v1/search?query={query}&per_page=15&orientation=portrait"
     res = requests.get(url, headers=headers).json()
     
-    videos = res.get("videos", [])
-    if not videos:
-        res = requests.get("https://api.pexels.com/videos/search?query=statue&per_page=10&orientation=portrait", headers=headers).json()
-        videos = res.get("videos", [])
+    photos = res.get("photos", [])
+    if not photos:
+        res = requests.get("https://api.pexels.com/v1/search?query=programmer&per_page=10&orientation=portrait", headers=headers).json()
+        photos = res.get("photos", [])
 
-    selected_video = random.choice(videos)
-    video_url = selected_video["video_files"][0]["link"]
+    selected = random.choice(photos)
+    image_url = selected["src"]["large2x"]
     
-    with open("background.mp4", "wb") as f:
-        f.write(requests.get(video_url).content)
+    with open("meme_bg.jpg", "wb") as f:
+        f.write(requests.get(image_url).content)
 
 def build_video(script_text):
     audio = AudioFileClip("audio.mp3")
-    video = VideoFileClip("background.mp4")
+    duration = audio.duration
 
-    if video.duration < audio.duration:
-        video = video.loop(duration=audio.duration)
-    else:
-        video = video.subclip(0, audio.duration)
+    # Создаем клип из картинки с плавной анимацией приближения (Zoom In)
+    img_clip = ImageClip("meme_bg.jpg").set_duration(duration)
+    
+    # Эффект плавного Zoom-In
+    img_animated = img_clip.resize(lambda t: 1 + 0.04 * t)
+    
+    # Позиционируем по центру
+    img_animated = img_animated.set_position(('center', 'center'))
 
-    video = video.set_audio(audio)
-
-    # Добавление субтитров по центру
+    # Выразительные желтые субтитры по центру
     try:
         txt_clip = (TextClip(
                         txt=script_text, 
-                        fontsize=36, 
-                        color='white', 
+                        fontsize=40, 
+                        color='yellow', 
                         font='DejaVu-Sans-Bold',
                         stroke_color='black',
-                        stroke_width=2,
+                        stroke_width=3,
                         method='caption',
-                        size=(int(video.w * 0.85), None)
+                        size=(int(1080 * 0.85), None)
                     )
                     .set_position(('center', 'center'))
-                    .set_duration(audio.duration))
+                    .set_duration(duration))
 
-        final_clip = CompositeVideoClip([video, txt_clip])
+        final_clip = CompositeVideoClip([img_animated, txt_clip], size=(1080, 1920))
     except Exception as e:
-        print(f"⚠️ Ошибка субтитров: {e}. Монтируем без текста.")
-        final_clip = video
+        print(f"⚠️ Ошибка субтитров: {e}")
+        final_clip = CompositeVideoClip([img_animated], size=(1080, 1920))
 
+    final_clip = final_clip.set_audio(audio)
     final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
+    
     audio.close()
-    video.close()
 
 def upload_to_youtube(metadata):
     from google.oauth2.credentials import Credentials
@@ -130,9 +127,9 @@ def upload_to_youtube(metadata):
 
     description_text = (
         f"{metadata['text']}\n\n"
-        f"🏛️ Daily Stoic wisdom to keep you disciplined.\n"
-        f"🔔 Subscribe to Daily Stoic Mindset for more daily philosophy!\n\n"
-        f"#shorts #stoicism #philosophy #mindset #wisdom"
+        f"💀 Relatable IT memes and dev life moments.\n"
+        f"🔔 Subscribe to Tech Humor Lab for daily laughs!\n\n"
+        f"#shorts #ithumor #programming #coding #tech"
     )
 
     body = {
@@ -140,7 +137,7 @@ def upload_to_youtube(metadata):
             'title': metadata['title'],
             'description': description_text,
             'tags': metadata['tags'],
-            'categoryId': '27'
+            'categoryId': '23'
         },
         'status': {'privacyStatus': 'public', 'selfDeclaredMadeForKids': False}
     }
@@ -148,17 +145,16 @@ def upload_to_youtube(metadata):
     media = MediaFileUpload("final_short.mp4", mimetype="video/mp4", resumable=False)
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
     response = request.execute()
-    print(f"✅ ВИДЕО ОПУБЛИКОВАНО! ID: {response.get('id')}")
+    print(f"✅ МЕМ-РОЛИК ОПУБЛИКОВАН! ID: {response.get('id')}")
 
-# 🚀 ТОЧКА ВХОДА — Запуск выполнения всей цепочки
 if __name__ == "__main__":
-    print("1. Генерируем сценарий...")
+    print("1. Генерируем IT-мем...")
     data = get_script()
-    print("2. Озвучиваем...")
+    print("2. Озвучиваем текст...")
     asyncio.run(create_audio(data['text']))
-    print("3. Скачиваем фон с Pexels...")
-    download_pexels_video(data['query'])
-    print("4. Собираем видео и накладываем субтитры...")
+    print("3. Ищем мемный визуал...")
+    download_pexels_image(data['image_query'])
+    print("4. Собираем динамический ролик с Zoom-эффектом...")
     build_video(data['text'])
-    print("5. Загружаем на YouTube...")
+    print("5. Публикуем на YouTube...")
     upload_to_youtube(data)
