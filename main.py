@@ -63,4 +63,10 @@ def get_script():
                 model='gemini-2.5-flash',
                 contents=prompt
             )
-            clean_json = response.text.replace("```json", "").replace("
+            clean_json = response.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean_json)
+        except Exception as e:
+            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 сек...")
+            time.sleep(15)
+            
+    raise Exception("❌ Ошибка от Gemini.")
