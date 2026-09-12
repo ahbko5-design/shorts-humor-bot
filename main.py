@@ -93,10 +93,8 @@ def generate_scene_images(scenes):
     return image_paths
 
 def generate_background_music(duration):
-    # Генерация легкого ненавязчивого ритмичного фона (синусоидальные биты) чтобы видео не было «пустым» по звуку
     def make_frame(t):
         import math
-        # Простой низкий электронный бит-фон
         freq = 110.0 if (int(t * 4) % 2 == 0) else 146.83
         val = math.sin(2 * math.pi * freq * t) * 0.05
         return [val, val]
@@ -109,7 +107,6 @@ def build_video(script_text, scenes_prompts):
     total_duration = audio.duration
     target_w, target_h = 1080, 1920
 
-    # Генерируем картинки под сцены
     image_paths = generate_scene_images(scenes_prompts)
 
     words = script_text.split()
@@ -132,7 +129,6 @@ def build_video(script_text, scenes_prompts):
         font = ImageFont.load_default()
 
     for i, chunk in enumerate(chunks):
-        # Циклически выбираем картинку для текущего кусочка текста
         img_path = image_paths[i % len(image_paths)]
         img_base = Image.open(img_path).convert("RGB")
         
@@ -147,7 +143,6 @@ def build_video(script_text, scenes_prompts):
         draw = ImageDraw.Draw(frame_img)
         wrapped = textwrap.wrap(chunk, width=18)
         
-        # Текст ниже середины, но не у самого низа (на 55% высоте экрана)
         y_text = int(target_h * 0.55)
         
         for line in wrapped:
@@ -155,11 +150,9 @@ def build_video(script_text, scenes_prompts):
             w = bbox[2] - bbox[0]
             x = (target_w - w) / 2
             
-            # Жирная черная обводка
             for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,4), (4,-4)]:
                 draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
             
-            # Желтый текст
             draw.text((x, y_text), line, font=font, fill="yellow")
             y_text += 85
 
@@ -172,9 +165,9 @@ def build_video(script_text, scenes_prompts):
 
     final_visual = concatenate_videoclips(clips, method="compose")
     
-    # Миксуем голос с фоновой музыкой
     bg_music = generate_background_music(total_duration)
-    final_audio = CompositeAudioClip([audio, bg_music.volumethrough(0.2)])
+    # Используем volumex вместо несуществующего volumethrough
+    final_audio = CompositeAudioClip([audio, bg_music.volumex(0.2)])
     
     final_clip = final_visual.set_audio(final_audio)
     final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
