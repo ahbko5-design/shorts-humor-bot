@@ -50,7 +50,7 @@ def get_script():
     Return ONLY a JSON object:
     {{
       "text": "Short spoken punchline here",
-      "image_prompt": "3D Pixar animation character, funny programmer reacting to computer error, highly detailed 3D render",
+      "image_prompt": "3D Pixar animation style, hilarious funny 3D programmer character reacting to glowing laptop screen, high quality 3d render",
       "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
       "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
@@ -76,27 +76,37 @@ async def create_audio(text):
     await communicate.save("audio.mp3")
 
 def generate_ai_image(image_prompt):
-    # Прямой генератор Flux.1 / SDXL с ПРИНУДИТЕЛЬНЫМ вертикальным форматом 9:16 (768x1344)
-    prompt_formatted = requests.utils.quote(f"{image_prompt}, 3d pixar style, portrait orientation, 9:16 aspect ratio, highly detailed")
-    
-    # Запрос напрямую на нейросеть с поддержкой соотношения сторон
-    url = f"https://image.pollinations.ai/prompt/{prompt_formatted}?model=flux&width=768&height=1344&nologo=true&seed={random.randint(1, 100000)}"
+    encoded_prompt = requests.utils.quote(f"{image_prompt}, pixar 3d style, vertical composition, highly detailed")
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=true&seed={random.randint(1, 100000)}"
     
     res = requests.get(url)
     with open("meme_bg.jpg", "wb") as f:
         f.write(res.content)
-    print("🎨 Вертикальная ИИ-картинка (9:16) успешно сгенерирована!")
+    print("🎨 Картинка успешно загружена!")
 
 def build_video(script_text):
     audio = AudioFileClip("audio.mp3")
     total_duration = audio.duration
     target_w, target_h = 1080, 1920
 
-    # Загружаем ИЗНАЧАЛЬНО вертикальное фото и просто приводим к разрешению холста 1080x1920
-    img_base = Image.open("meme_bg.jpg").convert("RGB")
-    bg_canvas = img_base.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    # 1. ПРАВИЛЬНЫЙ КРОП БЕЗ ИСКАЖЕНИЯ ПРОПОРЦИЙ (Smart Center Crop)
+    img_raw = Image.open("meme_bg.jpg").convert("RGB")
+    orig_w, orig_h = img_raw.size
 
-    # Разбиваем текст на бегущие короткие строчки (по 3-4 слова)
+    # Находим масштаб, чтобы картинка полностью заполнила 1080x1920 без растяжения
+    scale = max(target_w / orig_w, target_h / orig_h)
+    new_w = int(orig_w * scale)
+    new_h = int(orig_h * scale)
+
+    # Пропорционально меняем размер
+    img_scaled = img_raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    # Обрезаем ровно по центру лишнее
+    left = (new_w - target_w) // 2
+    top = (new_h - target_h) // 2
+    bg_canvas = img_scaled.crop((left, top, left + target_w, top + target_h))
+
+    # 2. Разбиение текста на динамические фразы (по 3-4 слова)
     words = script_text.split()
     chunks = []
     current_chunk = []
@@ -112,7 +122,7 @@ def build_video(script_text):
     clips = []
 
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 65)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
     except:
         font = ImageFont.load_default()
 
@@ -120,33 +130,36 @@ def build_video(script_text):
         frame_img = bg_canvas.copy()
         draw = ImageDraw.Draw(frame_img)
         
-        wrapped = textwrap.wrap(chunk, width=18)
-        y_text = int(target_h * 0.42)
+        wrapped = textwrap.wrap(chunk, width=20)
+        y_text = int(target_h * 0.40) # Центр экрана
         
         for line in wrapped:
             bbox = draw.textbbox((0, 0), line, font=font)
             w = bbox[2] - bbox[0]
             x = (target_w - w) / 2
             
-            # Черная контурная обводка
-            for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,4), (4,-4)]:
+            # Жирный черный контур для идеальной читаемости
+            for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,3), (4,-3)]:
                 draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
             
-            # Желтый текст
+            # Яркий желтый текст
             draw.text((x, y_text), line, font=font, fill="yellow")
-            y_text += 85
+            y_text += 75
 
         path = f"chunk_{i}.jpg"
         frame_img.save(path)
         
         clip = ImageClip(path).set_duration(chunk_duration)
-        clip = clip.resize(lambda t: 1 + 0.03 * t).set_position(('center', 'center'))
         clips.append(clip)
 
-    final_clip = concatenate_videoclips(clips, method="compose")
-    final_clip = final_clip.set_audio(audio)
-    final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
+    # Собираем все текстовые кадры воедино
+    final_visual = concatenate_videoclips(clips, method="compose")
+
+    # 3. Накладываем один плавный Zoom-In на всё готовое видео
+    final_animated = final_visual.resize(lambda t: 1 + 0.03 * (t / total_duration))
+    final_clip = final_animated.set_audio(audio)
     
+    final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     audio.close()
 
 def upload_to_youtube(metadata):
@@ -182,9 +195,9 @@ if __name__ == "__main__":
     data = get_script()
     print("2. Озвучиваем текст...")
     asyncio.run(create_audio(data['text']))
-    print("3. Генерируем нативную 9:16 картинку через Flux...")
+    print("3. Генерируем ИИ-картинку...")
     generate_ai_image(data['image_prompt'])
-    print("4. Собираем вертикальное видео с бегущим текстом...")
+    print("4. Правильно кадрируем 9:16 и накладываем текст...")
     build_video(data['text'])
     print("5. Публикуем на YouTube...")
     upload_to_youtube(data)
