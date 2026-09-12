@@ -8,12 +8,11 @@ import requests
 from google import genai
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
+from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
-# 1. Восстановление секретов и файлов авторизации
 if not os.path.exists('client_secret.json'):
     with open('client_secret.json', 'w') as f:
         f.write(os.getenv('CLIENT_SECRET_JSON', ''))
@@ -23,7 +22,6 @@ if not os.path.exists('token.json'):
         f.write(os.getenv('YOUTUBE_TOKEN', ''))
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
 HUMOR_TOPICS = [
     "junior dev deleting production database", 
@@ -41,18 +39,18 @@ def get_script():
     selected_topic = random.choice(HUMOR_TOPICS)
     
     prompt = f"""
-    Write a hilarious, relatable IT meme script.
+    Write a short, hilarious, punchy IT meme script (maximum 2 sentences).
     TOPIC: {selected_topic}.
-    Random seed: {random.randint(1000, 9999)}
     
     Voiceover guidelines:
     - Sarcastic, fast-paced developer moment.
-    - END WITH: "Subscribe to Tech Humor Lab for daily IT laughs!"
+    - Keep it concise so captions fit nicely.
+    - END WITH: "Classic developer life!"
     
     Return ONLY a JSON object:
     {{
-      "text": "The full spoken text of the video without markdown or emojis",
-      "image_query": "funny cat computer OR stressed programmer OR disaster face OR shocked face OR hacker",
+      "text": "Short spoken punchline here",
+      "image_prompt": "Pixar 3D animation style, expressive funny 3D character programmer reacting to a glowing laptop in a dark room, vibrant colors, vertical 9:16",
       "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
       "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
@@ -64,93 +62,96 @@ def get_script():
                 model='gemini-2.5-flash',
                 contents=prompt
             )
-            raw_text = response.text.strip()
-            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+            raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
             return json.loads(raw_text)
         except Exception as e:
-            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 сек...")
-            time.sleep(15)
+            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 10 сек...")
+            time.sleep(10)
             
-    raise Exception("❌ Ошибка при генерации через Gemini.")
+    raise Exception("❌ Ошибка от Gemini.")
 
 async def create_audio(text):
     voice = "en-US-EricNeural" 
     communicate = edge_tts.Communicate(text, voice, rate="+15%", pitch="+5Hz")
     await communicate.save("audio.mp3")
 
-def download_pexels_image(query):
-    headers = {"Authorization": PEXELS_API_KEY}
-    random_page = random.randint(1, 3)
-    url = f"https://api.pexels.com/v1/search?query={query}&per_page=15&page={random_page}&orientation=portrait"
-    res = requests.get(url, headers=headers).json()
+def generate_ai_image(image_prompt):
+    # Используем надежный генератор красивого 3D/Pixar стиля
+    encoded_prompt = requests.utils.quote(image_prompt + ", Pixar 3D style, vibrant lighting, highly detailed, vertical 9:16")
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=true&seed={random.randint(1, 100000)}"
     
-    photos = res.get("photos", [])
-    if not photos:
-        res = requests.get("https://api.pexels.com/v1/search?query=programmer&per_page=10&orientation=portrait", headers=headers).json()
-        photos = res.get("photos", [])
-
-    selected = random.choice(photos)
-    image_url = selected["src"]["large2x"]
-    
+    img_data = requests.get(url).content
     with open("meme_bg.jpg", "wb") as f:
-        f.write(requests.get(image_url).content)
-    print("📸 Мемная картинка успешно загружена!")
+        f.write(img_data)
+    print("🎨 Pixar/3D картинка успешно сгенерирована!")
 
 def build_video(script_text):
     audio = AudioFileClip("audio.mp3")
-    duration = audio.duration
+    total_duration = audio.duration
     target_w, target_h = 1080, 1920
 
-    # 1. Загружаем картинку и делаем идеальный вертикальный холст 9:16 без растягивания
-    img = Image.open("meme_bg.jpg").convert("RGB")
-    img_w, img_h = img.size
-    
+    # Обрабатываем базовую картинку в 9:16
+    img_base = Image.open("meme_bg.jpg").convert("RGB")
+    img_w, img_h = img_base.size
     scale = max(target_w / img_w, target_h / img_h)
     new_w, new_h = int(img_w * scale), int(img_h * scale)
+    img_base = img_base.resize((new_w, new_h), Image.Resampling.LANCZOS)
     
-    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    
-    background = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-    left = (target_w - new_w) // 2
-    top = (target_h - new_h) // 2
-    background.paste(img, (left, top))
+    bg_canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    bg_canvas.paste(img_base, ((target_w - new_w) // 2, (target_h - new_h) // 2))
 
-    # 2. Рендерим текст поверх вертикального кадра через PIL
-    draw = ImageDraw.Draw(background)
-    
+    # Разбиваем текст на короткие кусочки (по 3-4 слова на кадр)
+    words = script_text.split()
+    chunks = []
+    current_chunk = []
+    for word in words:
+        current_chunk.append(word)
+        if len(current_chunk) >= 4:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+
+    chunk_duration = total_duration / max(len(chunks), 1)
+    clips = []
+
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 55)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 65)
     except:
         font = ImageFont.load_default()
 
-    wrapped_lines = textwrap.wrap(script_text, width=22)
-    line_height = 75
-    y_text = int(target_h * 0.25)
-
-    for line in wrapped_lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        w = bbox[2] - bbox[0]
-        x = (target_w - w) / 2
+    for i, chunk in enumerate(chunks):
+        frame_img = bg_canvas.copy()
+        draw = ImageDraw.Draw(frame_img)
         
-        # Черная обводка для читаемости текста
-        for adj in [(-3,0), (3,0), (0,-3), (0,3), (-3,-3), (3,3), (-3,3), (3,-3)]:
-            draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
+        wrapped = textwrap.wrap(chunk, width=18)
+        y_text = int(target_h * 0.40) # Центр экрана для динамичных фраз
         
-        # Основной желтый текст
-        draw.text((x, y_text), line, font=font, fill="yellow")
-        y_text += line_height
+        for line in wrapped:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            w = bbox[2] - bbox[0]
+            x = (target_w - w) / 2
+            
+            # Жирная черная обводка
+            for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,4), (4,-4)]:
+                draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
+            
+            # Желтый яркий текст
+            draw.text((x, y_text), line, font=font, fill="yellow")
+            y_text += 85
 
-    final_frame_path = "final_frame.jpg"
-    background.save(final_frame_path)
+        path = f"chunk_{i}.jpg"
+        frame_img.save(path)
+        
+        # Динамичный клип с зумом для каждого короткого слова/фразы
+        clip = ImageClip(path).set_duration(chunk_duration)
+        clip = clip.resize(lambda t: 1 + 0.03 * t).set_position(('center', 'center'))
+        clips.append(clip)
 
-    # 3. Собираем видео с анимацией Zoom-In
-    img_clip = ImageClip(final_frame_path).set_duration(duration)
-    img_animated = img_clip.resize(lambda t: 1 + 0.04 * t).set_position(('center', 'center'))
-
-    final_clip = CompositeVideoClip([img_animated], size=(target_w, target_h))
-    final_clip = final_clip.set_audio(audio)
-    
+    final_visual = concatenate_videoclips(clips, method="compose")
+    final_clip = final_visual.set_audio(audio)
     final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
+    
     audio.close()
 
 def upload_to_youtube(metadata):
@@ -182,13 +183,13 @@ def upload_to_youtube(metadata):
     print(f"✅ МЕМ-РОЛИК ОПУБЛИКОВАН! ID: {response.get('id')}")
 
 if __name__ == "__main__":
-    print("1. Генерируем IT-мем...")
+    print("1. Генерируем короткий IT-мем...")
     data = get_script()
     print("2. Озвучиваем текст...")
     asyncio.run(create_audio(data['text']))
-    print("3. Скачиваем картинку...")
-    download_pexels_image(data['image_query'])
-    print("4. Собираем вертикальный ролик с текстом и зумом...")
+    print("3. Генерируем Pixar 3D картинку...")
+    generate_ai_image(data['image_prompt'])
+    print("4. Собираем видео с динамической сменой фраз и зумом...")
     build_video(data['text'])
     print("5. Публикуем на YouTube...")
     upload_to_youtube(data)
