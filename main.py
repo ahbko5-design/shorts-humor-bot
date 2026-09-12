@@ -8,7 +8,7 @@ import requests
 from google import genai
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
+from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeAudioClip, AudioClip
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
@@ -39,18 +39,21 @@ def get_script():
     selected_topic = random.choice(HUMOR_TOPICS)
     
     prompt = f"""
-    Write a short, hilarious, punchy IT meme script (maximum 2 sentences).
+    Write a short, hilarious IT meme script (2-3 short sentences) featuring funny animals (like cats or dogs) acting like human programmers.
     TOPIC: {selected_topic}.
     
     Voiceover guidelines:
     - Sarcastic, fast-paced developer moment.
-    - Keep it concise so captions fit nicely.
     - END WITH: "Classic developer life!"
     
     Return ONLY a JSON object:
     {{
       "text": "Short spoken punchline here",
-      "image_prompt": "Pixar 3D animation style, expressive funny 3D character programmer reacting to a glowing laptop in a dark room, vibrant colors, vertical 9:16",
+      "scenes": [
+        "A funny Pixar 3D style cat programmer sweating heavily at a desk with multiple monitors, human-like posture, vertical 9:16",
+        "A shocked Pixar 3D style cat looking at exploding code on a laptop screen, expressive face, vertical 9:16",
+        "A chill Pixar 3D style cat drinking coffee surrounded by chaos, vertical 9:16"
+      ],
       "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
       "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
@@ -75,32 +78,40 @@ async def create_audio(text):
     communicate = edge_tts.Communicate(text, voice, rate="+15%", pitch="+5Hz")
     await communicate.save("audio.mp3")
 
-def generate_ai_image(image_prompt):
-    # Используем надежный генератор красивого 3D/Pixar стиля
-    encoded_prompt = requests.utils.quote(image_prompt + ", Pixar 3D style, vibrant lighting, highly detailed, vertical 9:16")
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=true&seed={random.randint(1, 100000)}"
-    
-    img_data = requests.get(url).content
-    with open("meme_bg.jpg", "wb") as f:
-        f.write(img_data)
-    print("🎨 Pixar/3D картинка успешно сгенерирована!")
+def generate_scene_images(scenes):
+    image_paths = []
+    for i, prompt_text in enumerate(scenes):
+        encoded_prompt = requests.utils.quote(prompt_text + ", Pixar 3D style, vibrant lighting, highly detailed, vertical 9:16")
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=true&seed={random.randint(1, 100000)}"
+        
+        img_data = requests.get(url).content
+        path = f"scene_{i}.jpg"
+        with open(path, "wb") as f:
+            f.write(img_data)
+        image_paths.append(path)
+    print("🎨 Набор Pixar-картинок с животными сгенерирован!")
+    return image_paths
 
-def build_video(script_text):
+def generate_background_music(duration):
+    # Генерация легкого ненавязчивого ритмичного фона (синусоидальные биты) чтобы видео не было «пустым» по звуку
+    def make_frame(t):
+        import math
+        # Простой низкий электронный бит-фон
+        freq = 110.0 if (int(t * 4) % 2 == 0) else 146.83
+        val = math.sin(2 * math.pi * freq * t) * 0.05
+        return [val, val]
+
+    bg_music = AudioClip(make_frame, duration=duration, fps=22050)
+    return bg_music
+
+def build_video(script_text, scenes_prompts):
     audio = AudioFileClip("audio.mp3")
     total_duration = audio.duration
     target_w, target_h = 1080, 1920
 
-    # Обрабатываем базовую картинку в 9:16
-    img_base = Image.open("meme_bg.jpg").convert("RGB")
-    img_w, img_h = img_base.size
-    scale = max(target_w / img_w, target_h / img_h)
-    new_w, new_h = int(img_w * scale), int(img_h * scale)
-    img_base = img_base.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    
-    bg_canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-    bg_canvas.paste(img_base, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+    # Генерируем картинки под сцены
+    image_paths = generate_scene_images(scenes_prompts)
 
-    # Разбиваем текст на короткие кусочки (по 3-4 слова на кадр)
     words = script_text.split()
     chunks = []
     current_chunk = []
@@ -121,11 +132,23 @@ def build_video(script_text):
         font = ImageFont.load_default()
 
     for i, chunk in enumerate(chunks):
-        frame_img = bg_canvas.copy()
-        draw = ImageDraw.Draw(frame_img)
+        # Циклически выбираем картинку для текущего кусочка текста
+        img_path = image_paths[i % len(image_paths)]
+        img_base = Image.open(img_path).convert("RGB")
         
+        img_w, img_h = img_base.size
+        scale = max(target_w / img_w, target_h / img_h)
+        new_w, new_h = int(img_w * scale), int(img_h * scale)
+        img_base = img_base.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        
+        frame_img = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+        frame_img.paste(img_base, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+
+        draw = ImageDraw.Draw(frame_img)
         wrapped = textwrap.wrap(chunk, width=18)
-        y_text = int(target_h * 0.40) # Центр экрана для динамичных фраз
+        
+        # Текст ниже середины, но не у самого низа (на 55% высоте экрана)
+        y_text = int(target_h * 0.55)
         
         for line in wrapped:
             bbox = draw.textbbox((0, 0), line, font=font)
@@ -136,22 +159,25 @@ def build_video(script_text):
             for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,4), (4,-4)]:
                 draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
             
-            # Желтый яркий текст
+            # Желтый текст
             draw.text((x, y_text), line, font=font, fill="yellow")
             y_text += 85
 
         path = f"chunk_{i}.jpg"
         frame_img.save(path)
         
-        # Динамичный клип с зумом для каждого короткого слова/фразы
         clip = ImageClip(path).set_duration(chunk_duration)
         clip = clip.resize(lambda t: 1 + 0.03 * t).set_position(('center', 'center'))
         clips.append(clip)
 
     final_visual = concatenate_videoclips(clips, method="compose")
-    final_clip = final_visual.set_audio(audio)
-    final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     
+    # Миксуем голос с фоновой музыкой
+    bg_music = generate_background_music(total_duration)
+    final_audio = CompositeAudioClip([audio, bg_music.volumethrough(0.2)])
+    
+    final_clip = final_visual.set_audio(final_audio)
+    final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     audio.close()
 
 def upload_to_youtube(metadata):
@@ -183,13 +209,11 @@ def upload_to_youtube(metadata):
     print(f"✅ МЕМ-РОЛИК ОПУБЛИКОВАН! ID: {response.get('id')}")
 
 if __name__ == "__main__":
-    print("1. Генерируем короткий IT-мем...")
+    print("1. Генерируем IT-мем с животными...")
     data = get_script()
     print("2. Озвучиваем текст...")
     asyncio.run(create_audio(data['text']))
-    print("3. Генерируем Pixar 3D картинку...")
-    generate_ai_image(data['image_prompt'])
-    print("4. Собираем видео с динамической сменой фраз и зумом...")
-    build_video(data['text'])
-    print("5. Публикуем на YouTube...")
+    print("3. Генерируем сцены с животными в стиле Pixar...")
+    build_video(data['text'], data['scenes'])
+    print("4. Публикуем на YouTube...")
     upload_to_youtube(data)
