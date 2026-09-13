@@ -92,10 +92,20 @@ async def create_audio(text):
 def download_bgm():
     bgm_url = random.choice(FUNNY_BGM)
     try:
-        res = requests.get(bgm_url, timeout=10)
-        with open("bgm.mp3", "wb") as f:
-            f.write(res.content)
-        print("🎵 Фоновая смешная музыка загружена!")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+        }
+        res = requests.get(bgm_url, headers=headers, timeout=10)
+        
+        # Строгая проверка на то, что скачалось именно аудио
+        if res.status_code == 200 and 'audio' in res.headers.get('Content-Type', '').lower():
+            with open("bgm.mp3", "wb") as f:
+                f.write(res.content)
+            print("🎵 Фоновая смешная музыка загружена!")
+        else:
+            print(f"⚠️ Защита сайта не отдала музыку. Видео соберётся без неё.")
+            if os.path.exists("bgm.mp3"):
+                os.remove("bgm.mp3")
     except Exception as e:
         print(f"⚠️ Не удалось скачать музыку: {e}")
 
@@ -140,14 +150,11 @@ def build_video(script_text):
     voice_audio = AudioFileClip("audio.mp3")
     duration = voice_audio.duration
 
-    # Сначала обрезаем скачанное фото ровно под размер 1080x1920
     prepare_vertical_background()
 
-    # Создаем клип с Zoom-эффектом из УЖЕ правильного 9:16 фото (без вытягиваний!)
     img_clip = ImageClip("meme_bg.jpg").set_duration(duration)
     img_animated = img_clip.resize(lambda t: 1 + 0.04 * (t / duration)).set_position(('center', 'center'))
 
-    # Выразительные субтитры через TextClip
     try:
         txt_clip = (TextClip(
                         txt=script_text, 
@@ -167,12 +174,15 @@ def build_video(script_text):
         print(f"⚠️ Ошибка вывода субтитров: {e}. Монтируем без текста.")
         final_clip = CompositeVideoClip([img_animated], size=(1080, 1920))
 
-    # Сводим голос диктора и забавную музыку на фоне
     audio_tracks = [voice_audio]
+    # Добавляем музыку только если файл скачался и он не битый
     if os.path.exists("bgm.mp3"):
-        bgm_clip = AudioFileClip("bgm.mp3").set_duration(duration)
-        bgm_clip = volumex(bgm_clip, 0.15) # Тихая фоновая музыка (15%)
-        audio_tracks.append(bgm_clip)
+        try:
+            bgm_clip = AudioFileClip("bgm.mp3").set_duration(duration)
+            bgm_clip = volumex(bgm_clip, 0.15)
+            audio_tracks.append(bgm_clip)
+        except Exception as e:
+            print(f"⚠️ Файл bgm.mp3 поврежден, пропускаем музыку: {e}")
 
     final_audio = CompositeAudioClip(audio_tracks)
     final_clip = final_clip.set_audio(final_audio)
@@ -187,7 +197,6 @@ def upload_to_youtube(metadata):
     with open('token.json', 'r') as f:
         token_data = json.load(f)
 
-    # Используем токены без привязки к client_secret
     creds = Credentials(
         token=token_data.get('token'),
         refresh_token=token_data.get('refresh_token'),
