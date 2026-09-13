@@ -1,21 +1,21 @@
+from PIL import Image
+if not hasattr(Image, 'ANTIALIAS'):
+    Image.ANTIALIAS = Image.Resampling.LANCZOS
+
 import os
-import re
 import json
 import time
 import random
-import asyncio
-import textwrap
 import requests
-import numpy as np
+import asyncio
 from google import genai
 import edge_tts
-from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import ImageClip, AudioFileClip, VideoClip, CompositeVideoClip
-import google_auth_oauthlib.flow
+from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip, CompositeAudioClip
+from moviepy.audio.fx.all import volumex
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
-# 1. Восстановление секретов и авторизации
+# 1. Восстановление секретов и файлов авторизации
 if not os.path.exists('client_secret.json'):
     with open('client_secret.json', 'w') as f:
         f.write(os.getenv('CLIENT_SECRET_JSON', ''))
@@ -26,6 +26,12 @@ if not os.path.exists('token.json'):
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+
+# Смешные фоновые треки (Royalty Free)
+FUNNY_BGM = [
+    "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a73467.mp3", # Quirky comedy
+    "https://cdn.pixabay.com/download/audio/2022/01/18/audio_82c6d48227.mp3"  # Funny sneaky
+]
 
 HUMOR_TOPICS = [
     "junior dev deleting production database", 
@@ -38,38 +44,23 @@ HUMOR_TOPICS = [
     "AI writing code with full confidence"
 ]
 
-FALLBACK_SCRIPTS = [
-    {
-        "text": "When you fix a simple typo and production goes down immediately. Subscribe to Tech Humor Lab for daily IT laughs!",
-        "image_query": "funny cat computer OR stressed programmer",
-        "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
-        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
-    },
-    {
-        "text": "Deploying unverified code on Friday at 5 PM. What could go wrong? Subscribe to Tech Humor Lab for daily IT laughs!",
-        "image_query": "disaster face OR shock programmer",
-        "title": "Friday Deployment Be Like... 💀 #shorts #ithumor #tech #programming",
-        "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
-    }
-]
-
 def get_script():
     client = genai.Client(api_key=GEMINI_API_KEY)
     selected_topic = random.choice(HUMOR_TOPICS)
     
     prompt = f"""
-    Write a short, hilarious, punchy IT meme script (2 sentences max).
+    Write a hilarious, relatable IT meme script.
     TOPIC: {selected_topic}.
     Random seed: {random.randint(1000, 9999)}
     
     Voiceover guidelines:
-    - Sarcastic, fast-paced developer moment.
+    - Sarcastic, fast-paced, relatable developer moment.
     - END WITH: "Subscribe to Tech Humor Lab for daily IT laughs!"
     
     Return ONLY a JSON object:
     {{
       "text": "The full spoken text of the video without markdown or emojis",
-      "image_query": "funny cat computer OR stressed programmer OR disaster face OR shocked face OR hacker",
+      "image_query": "funny cat computer OR stressed programmer OR disaster face OR shocked face",
       "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
       "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"]
     }}
@@ -81,153 +72,135 @@ def get_script():
                 model='gemini-2.5-flash',
                 contents=prompt
             )
-            raw = response.text
-            start = raw.find('{')
-            end = raw.rfind('}') + 1
-            return json.loads(raw[start:end])
+            raw_text = response.text.strip()
+            if "```" in raw_text:
+                raw_text = raw_text.split("```")[1]
+                if raw_text.startswith("json"):
+                    raw_text = raw_text[4:]
+            return json.loads(raw_text.strip())
         except Exception as e:
-            err_msg = str(e)
-            match = re.search(r"retryDelay': '(\d+)s'", err_msg)
-            wait_time = int(match.group(1)) + 2 if match else 35
-            print(f"⚠️ Задержка Gemini (429). Попытка {attempt + 1}/5. Ждём {wait_time} сек...")
-            time.sleep(wait_time)
+            print(f"⚠️ Попытка {attempt + 1} не удалась ({e}). Ждем 15 сек...")
+            time.sleep(15)
             
-    print("⚠️ Квота Gemini исчерпана. Берем резервный сценарий...")
-    return random.choice(FALLBACK_SCRIPTS)
+    raise Exception("❌ Ошибка при генерации через Gemini.")
 
 async def create_audio(text):
     voice = "en-US-EricNeural" 
     communicate = edge_tts.Communicate(text, voice, rate="+15%", pitch="+5Hz")
     await communicate.save("audio.mp3")
 
+def download_bgm():
+    bgm_url = random.choice(FUNNY_BGM)
+    try:
+        res = requests.get(bgm_url, timeout=10)
+        with open("bgm.mp3", "wb") as f:
+            f.write(res.content)
+        print("🎵 Фоновая смешная музыка загружена!")
+    except Exception as e:
+        print(f"⚠️ Не удалось скачать музыку: {e}")
+
 def download_pexels_image(query):
     headers = {"Authorization": PEXELS_API_KEY}
     random_page = random.randint(1, 8)
     url = f"https://api.pexels.com/v1/search?query={query}&per_page=15&page={random_page}&orientation=portrait"
-    res = requests.get(url, headers=headers).json()
     
-    photos = res.get("photos", [])
+    try:
+        res = requests.get(url, headers=headers).json()
+        photos = res.get("photos", [])
+    except Exception:
+        photos = []
+    
     if not photos:
-        random_page = random.randint(1, 5)
-        res = requests.get(f"https://api.pexels.com/v1/search?query=programmer&per_page=15&page={random_page}&orientation=portrait", headers=headers).json()
+        res = requests.get("https://api.pexels.com/v1/search?query=funny computer&per_page=15&orientation=portrait", headers=headers).json()
         photos = res.get("photos", [])
 
     selected = random.choice(photos)
     image_url = selected["src"]["large2x"]
     
-    with open("meme_bg.jpg", "wb") as f:
+    with open("meme_raw.jpg", "wb") as f:
         f.write(requests.get(image_url).content)
-    print("📸 Новая случайная картинка с Pexels скачана!")
+    print("📸 Фото загружено!")
 
 def prepare_vertical_background():
+    """ Правильно кадрирует ЛЮБОЕ фото в формат 9:16 без растяжения (Crop-to-fill) """
     target_w, target_h = 1080, 1920
-    img = Image.open("meme_bg.jpg").convert("RGB")
+    img = Image.open("meme_raw.jpg").convert("RGB")
     orig_w, orig_h = img.size
 
     scale = max(target_w / orig_w, target_h / orig_h)
-    new_w = int(orig_w * scale)
-    new_h = int(orig_h * scale)
-
+    new_w, new_h = int(orig_w * scale), int(orig_h * scale)
     img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     left = (new_w - target_w) // 2
     top = (new_h - target_h) // 2
     cropped_img = img_resized.crop((left, top, left + target_w, top + target_h))
-    
-    cropped_img.save("clean_bg.jpg")
+    cropped_img.save("meme_bg.jpg")
 
 def build_video(script_text):
-    audio = AudioFileClip("audio.mp3")
-    total_duration = audio.duration
-    target_w, target_h = 1080, 1920
+    voice_audio = AudioFileClip("audio.mp3")
+    duration = voice_audio.duration
 
+    # Сначала обрезаем скачанное фото ровно под размер 1080x1920
     prepare_vertical_background()
 
-    # Фоновый клип с плавной анимацией Zoom-In
-    bg_clip = ImageClip("clean_bg.jpg").set_duration(total_duration)
-    bg_animated = bg_clip.resize(lambda t: 1 + 0.04 * (t / total_duration)).set_position(('center', 'center'))
+    # Создаем клип с Zoom-эффектом из УЖЕ правильного 9:16 фото (без вытягиваний!)
+    img_clip = ImageClip("meme_bg.jpg").set_duration(duration)
+    img_animated = img_clip.resize(lambda t: 1 + 0.04 * (t / duration)).set_position(('center', 'center'))
 
-    # Разбиение текста на короткие фразы (по 3-4 слова) для бегущих субтитров
-    words = script_text.split()
-    chunks = []
-    current_chunk = []
-    for word in words:
-        current_chunk.append(word)
-        if len(current_chunk) >= 4:
-            chunks.append(" ".join(current_chunk))
-            current_chunk = []
-    if current_chunk:
-        chunks.append(" ".join(current_chunk))
-
-    chunk_duration = total_duration / max(len(chunks), 1)
-
+    # Выразительные субтитры через TextClip
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-    except:
-        font = ImageFont.load_default()
+        txt_clip = (TextClip(
+                        txt=script_text, 
+                        fontsize=50, 
+                        color='yellow', 
+                        font='DejaVu-Sans-Bold',
+                        stroke_color='black',
+                        stroke_width=3,
+                        method='caption',
+                        size=(int(1080 * 0.85), None)
+                    )
+                    .set_position(('center', 'center'))
+                    .set_duration(duration))
 
-    # Отрисовка текста на видимом клипе
-    def make_caption_frame(t):
-        chunk_idx = min(int(t / chunk_duration), len(chunks) - 1)
-        current_text = chunks[chunk_idx]
+        final_clip = CompositeVideoClip([img_animated, txt_clip], size=(1080, 1920))
+    except Exception as e:
+        print(f"⚠️ Ошибка вывода субтитров: {e}. Монтируем без текста.")
+        final_clip = CompositeVideoClip([img_animated], size=(1080, 1920))
 
-        txt_image = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-        draw = ImageDraw.Draw(txt_image)
+    # Сводим голос диктора и забавную музыку на фоне
+    audio_tracks = [voice_audio]
+    if os.path.exists("bgm.mp3"):
+        bgm_clip = AudioFileClip("bgm.mp3").set_duration(duration)
+        bgm_clip = volumex(bgm_clip, 0.15) # Тихая фоновая музыка (15%)
+        audio_tracks.append(bgm_clip)
 
-        wrapped = textwrap.wrap(current_text, width=18)
-        y_text = int(target_h * 0.38)
+    final_audio = CompositeAudioClip(audio_tracks)
+    final_clip = final_clip.set_audio(final_audio)
 
-        for line in wrapped:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            w = bbox[2] - bbox[0]
-            x = (target_w - w) / 2
-
-            for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,4), (4,-4)]:
-                draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill="black")
-
-            draw.text((x, y_text), line, font=font, fill="yellow")
-            y_text += 75
-
-        return np.array(txt_image)
-
-    # Отрисовка маски прозрачности
-    def make_mask_frame(t):
-        chunk_idx = min(int(t / chunk_duration), len(chunks) - 1)
-        current_text = chunks[chunk_idx]
-
-        mask_image = Image.new("L", (target_w, target_h), 0)
-        draw = ImageDraw.Draw(mask_image)
-
-        wrapped = textwrap.wrap(current_text, width=18)
-        y_text = int(target_h * 0.38)
-
-        for line in wrapped:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            w = bbox[2] - bbox[0]
-            x = (target_w - w) / 2
-
-            for adj in [(-4,0), (4,0), (0,-4), (0,4), (-4,-4), (4,4), (-4,4), (4,-4)]:
-                draw.text((x + adj[0], y_text + adj[1]), line, font=font, fill=255)
-
-            draw.text((x, y_text), line, font=font, fill=255)
-            y_text += 75
-
-        return np.array(mask_image) / 255.0
-
-    caption_clip = VideoClip(make_caption_frame, duration=total_duration)
-    mask_clip = VideoClip(make_mask_frame, ismask=True, duration=total_duration)
-    caption_clip = caption_clip.set_mask(mask_clip)
-
-    final_clip = CompositeVideoClip([bg_animated, caption_clip], size=(target_w, target_h))
-    final_clip = final_clip.set_audio(audio)
-    
     final_clip.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
-    audio.close()
+    voice_audio.close()
 
 def upload_to_youtube(metadata):
     from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
     
-    creds = Credentials.from_authorized_user_file('token.json', ["https://www.googleapis.com/auth/youtube.upload"])
+    with open('token.json', 'r') as f:
+        token_data = json.load(f)
+
+    # Используем токены без привязки к client_secret
+    creds = Credentials(
+        token=token_data.get('token'),
+        refresh_token=token_data.get('refresh_token'),
+        token_uri=token_data.get('token_uri', "https://oauth2.googleapis.com/token"),
+        client_id=token_data.get('client_id'),
+        client_secret=token_data.get('client_secret'),
+        scopes=["https://www.googleapis.com/auth/youtube.upload"]
+    )
+
+    if creds.expired and creds.refresh_token:
+        print("🔄 Обновляем истёкший access token...")
+        creds.refresh(Request())
+        
     youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
 
     description_text = (
@@ -255,11 +228,13 @@ def upload_to_youtube(metadata):
 if __name__ == "__main__":
     print("1. Генерируем IT-мем...")
     data = get_script()
-    print("2. Озвучиваем текст...")
+    print("2. Озвучиваем текст с динамическим тоном...")
     asyncio.run(create_audio(data['text']))
-    print("3. Ищем случайный визуал с Pexels...")
+    print("3. Скачиваем фоновую смешную музыку...")
+    download_bgm()
+    print("4. Ищем мемную реакцию на Pexels...")
     download_pexels_image(data['image_query'])
-    print("4. Собираем 9:16 видео с бегущими субтитрами...")
+    print("5. Собираем видео с Crop-to-fill, музыкой и субтитрами...")
     build_video(data['text'])
-    print("5. Публикуем на YouTube...")
+    print("6. Загружаем на YouTube...")
     upload_to_youtube(data)
