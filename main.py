@@ -6,7 +6,6 @@ import os
 import json
 import time
 import random
-import requests
 import asyncio
 import textwrap
 import numpy as np
@@ -29,47 +28,41 @@ if not os.path.exists('token.json'):
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-FUNNY_BGM = [
-    "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a73467.mp3",
-    "https://cdn.pixabay.com/download/audio/2022/01/18/audio_82c6d48227.mp3"
+# Расширенная база тем: кофейни, парки, лавочки, созвоны и жизненный абсурд
+LIFE_TOPICS = [
+    "trying to enjoy coffee in a park while thinking about work deadlines",
+    "awkward moments during an online work meeting with camera accidentally on",
+    "attempting to start a healthy lifestyle on Monday morning",
+    "sitting on a park bench watching autumn leaves fall and questioning life choices",
+    "waiting in line at a trendy coffee shop for a matcha latte",
+    "working from a cozy coffee shop with bad Wi-Fi and overpriced pastry",
+    "junior dev deleting production database on a Friday evening",
+    "trying to look busy during a pointless corporate meeting",
+    "staying up until 3 AM scrolling through reels instead of sleeping",
+    "senior dev reviewing code and questioning humanity",
+    "getting caught talking to yourself while debugging or thinking out loud",
+    "the sheer panic when someone says 'we need to talk' at work"
 ]
 
-HUMOR_TOPICS = [
-    "junior dev deleting production database", 
-    "fixing bug creates 10 new bugs",
-    "senior dev code review feedback", 
-    "trying to center a div with CSS",
-    "deploying unverified code on Friday 5 PM", 
-    "StackOverflow answer saving the day",
-    "client asking for a quick small change", 
-    "AI writing code with full confidence"
-]
-
-def get_script_and_image_prompts():
+def get_script_and_metadata():
     client = genai.Client(api_key=GEMINI_API_KEY)
-    selected_topic = random.choice(HUMOR_TOPICS)
+    selected_topic = random.choice(LIFE_TOPICS)
     
     prompt = f"""
-    Write a hilarious, relatable IT meme script.
-    TOPIC: {selected_topic}.
+    Write a hilarious, relatable, short viral script for YouTube Shorts.
+    THEME/SITUATION: {selected_topic}.
     Random seed: {random.randint(1000, 9999)}
     
-    Voiceover guidelines:
-    - Sarcastic, fast-paced, relatable developer moment.
+    Guidelines:
+    - Sarcastic, funny, highly relatable everyday moment or office humor.
+    - Keep it punchy and engaging.
     - DO NOT include any calls to action or subscribe prompts. End with a strong punchline.
-    
-    We need 3 visual scenes for this joke featuring anthropomorphic animals in Disney Pixar 3D animation style (animals acting like human programmers/office workers).
     
     Return ONLY a JSON object in this exact format:
     {{
       "text": "The full spoken text of the video without markdown or emojis",
-      "title": "IT Life Be Like... 💀 #shorts #ithumor #tech #programming",
-      "tags": ["TechHumor", "ProgrammingMemes", "Coding", "DeveloperLife", "Shorts"],
-      "image_prompts": [
-        "A cute fluffy cat wearing glasses typing nervously on a tiny laptop in a messy office, Disney Pixar 3D animation style, highly detailed, vertical 9:16",
-        "A stressed raccoon holding its head in paws staring at glowing error screens, office background, Disney Pixar 3D style, vertical 9:16",
-        "A triumphant smug golden retriever dog leaning back in an office chair with coffee, Disney Pixar 3D style, vertical 9:16"
-      ]
+      "title": "Life Be Like... 💀 #shorts #relatable #humor #lifestyle",
+      "tags": ["Relatable", "Humor", "Life", "Shorts", "DayInTheLife"]
     }}
     """
     
@@ -96,53 +89,42 @@ async def create_audio(text):
     communicate = edge_tts.Communicate(text, voice, rate="+15%", pitch="+5Hz")
     await communicate.save("audio.mp3")
 
-def download_bgm():
-    bgm_url = random.choice(FUNNY_BGM)
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-        }
-        res = requests.get(bgm_url, headers=headers, timeout=15)
-        if res.status_code == 200 and 'audio' in res.headers.get('Content-Type', '').lower():
-            with open("bgm.mp3", "wb") as f:
-                f.write(res.content)
-            print("🎵 Фоновая музыка успешно скачана!")
-        else:
-            print("⚠️ Музыка не скачана (защита сайта), продолжаем без нее.")
-            if os.path.exists("bgm.mp3"):
-                os.remove("bgm.mp3")
-    except Exception as e:
-        print(f"⚠️ Ошибка при скачивании музыки: {e}")
-
-def generate_pixar_images(prompts):
-    """ Используем стабильный публичный генератор вертикальных 3D Pixar картинок без ограничений Enterprise API """
-    image_paths = []
+def get_local_bgm():
+    # Ищем музыку в папке assets или в корне репозитория
+    possible_paths = ["track1.mp3", "track2.mp3", "assets/track1.mp3", "assets/track2.mp3"]
+    available_tracks = [p for p in possible_paths if os.path.exists(p)]
     
-    for i, p_text in enumerate(prompts[:3]):
-        print(f"🎨 Создаем 3D Pixar картинку {i+1}/3...")
-        try:
-            # Используем публичный сервис генерации по текстовому описанию в стиле Pixar 9:16
-            encoded_prompt = requests.utils.quote(p_text + " 3D animation disney pixar style vertical 9:16")
-            img_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=true"
-            
-            res = requests.get(img_url, timeout=30)
-            if res.status_code == 200 and len(res.content) > 1000:
-                path = f"scene_{i}.jpg"
-                with open(path, "wb") as f:
-                    f.write(res.content)
-                image_paths.append(path)
-                print(f"✅ Картинка {i+1} успешно создана!")
-            else:
-                raise Exception(f"Bad status code {res.status_code}")
-        except Exception as e:
-            print(f"⚠️ Ошибка генерации картинки {i+1} через основной сервис: {e}. Создаем стилизованный кадр...")
-            # Резервный вариант: создаем красивый вертикальный фон с текстом темы
-            img = Image.new("RGB", (1080, 1920), (30, 30, 45))
-            path = f"scene_{i}.jpg"
-            img.save(path)
-            image_paths.append(path)
+    if available_tracks:
+        chosen = random.choice(available_tracks)
+        print(f"🎵 Используем локальный трек: {chosen}")
+        return chosen
+    print("⚠️ Локальная музыка не найдена в репозитории, продолжаем без нее.")
+    return None
 
-    return image_paths
+def get_local_pixar_images():
+    images_dir = "images"
+    if not os.path.exists(images_dir):
+        os.makedirs(images_dir, exist_ok=True)
+        
+    all_images = [os.path.join(images_dir, f) for f in os.listdir(images_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    
+    if len(all_images) >= 3:
+        chosen = random.sample(all_images, 3)
+        print(f"🎨 Выбраны локальные картинки для смены кадров: {chosen}")
+        return chosen
+    elif len(all_images) > 0:
+        chosen = [random.choice(all_images) for _ in range(3)]
+        print(f"🎨 Картинок меньше трех, дублируем: {chosen}")
+        return chosen
+    else:
+        print("⚠️ Папка images пуста! Создаем временные вертикальные заглушки.")
+        fallback = []
+        for i in range(3):
+            path = f"scene_{i}.jpg"
+            img = Image.new("RGB", (1080, 1920), (30, 30, 45))
+            img.save(path)
+            fallback.append(path)
+        return fallback
 
 def build_video(script_text, image_paths):
     voice_audio = AudioFileClip("audio.mp3")
@@ -165,6 +147,7 @@ def build_video(script_text, image_paths):
         clean_path = f"clean_scene_{i}.jpg"
         cropped_img.save(clean_path)
 
+        # Плавный Zoom-In эффект для оживления кадра
         img_clip = ImageClip(clean_path).set_duration(scene_duration)
         animated_clip = img_clip.resize(lambda t: 1 + 0.05 * (t / scene_duration)).set_position(('center', 'center'))
         scene_clips.append(animated_clip)
@@ -172,6 +155,7 @@ def build_video(script_text, image_paths):
     from moviepy.editor import concatenate_videoclips
     bg_video = concatenate_videoclips(scene_clips)
 
+    # Субтитры порциями по 4 слова
     words = script_text.split()
     chunks = []
     current_chunk = []
@@ -242,14 +226,16 @@ def build_video(script_text, image_paths):
 
     final_clip = CompositeVideoClip([bg_video, caption_clip], size=(target_w, target_h))
 
+    # Смешиваем голос диктора и локальную фоновую музыку
     audio_tracks = [voice_audio]
-    if os.path.exists("bgm.mp3"):
+    bgm_path = get_local_bgm()
+    if bgm_path:
         try:
-            bgm_clip = AudioFileClip("bgm.mp3").set_duration(total_duration)
-            bgm_clip = volumex(bgm_clip, 0.15)
+            bgm_clip = AudioFileClip(bgm_path).set_duration(total_duration)
+            bgm_clip = volumex(bgm_clip, 0.15)  # Тихий фоновый звук на 15%
             audio_tracks.append(bgm_clip)
         except Exception as e:
-            print(f"⚠️ Ошибка наложения музыки: {e}")
+            print(f"⚠️ Ошибка наложения фоновой музыки: {e}")
 
     final_audio = CompositeAudioClip(audio_tracks)
     final_clip = final_clip.set_audio(final_audio)
@@ -281,8 +267,8 @@ def upload_to_youtube(metadata):
 
     description_text = (
         f"{metadata['text']}\n\n"
-        f"🐾 Pixar-style animal IT humor & dev life moments.\n\n"
-        f"#shorts #ithumor #programming #coding #pixar"
+        f"✨ Relatable daily moments & life humor.\n\n"
+        f"#shorts #relatable #humor #lifestyle #vibe"
     )
 
     body = {
@@ -298,18 +284,16 @@ def upload_to_youtube(metadata):
     media = MediaFileUpload("final_short.mp4", mimetype="video/mp4", resumable=False)
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
     response = request.execute()
-    print(f"✅ ПИКСАР-МЕМ ОПУБЛИКОВАН! ID: {response.get('id')}")
+    print(f"✅ ВИДЕО ОПУБЛИКОВАНО! ID: {response.get('id')}")
 
 if __name__ == "__main__":
-    print("1. Генерируем IT-мем и промпты для Pixar-картинок...")
-    data = get_script_and_image_prompts()
+    print("1. Выбираем тему и генерируем скрипт через Gemini...")
+    data = get_script_and_metadata()
     print("2. Озвучиваем текст...")
     asyncio.run(create_audio(data['text']))
-    print("3. Скачиваем фоновую музыку...")
-    download_bgm()
-    print("4. Генерируем 3 вертикальные 9:16 картинки в стиле Pixar...")
-    image_files = generate_pixar_images(data['image_prompts'])
-    print("5. Собираем видео с зумом, сменой кадров и субтитрами...")
+    print("3. Подбираем локальные картинки из папки images...")
+    image_files = get_local_pixar_images()
+    print("4. Собираем видео с зумом, сменой 3 кадров, субтитрами и музыкой...")
     build_video(data['text'], image_files)
-    print("6. Загружаем на YouTube...")
+    print("5. Загружаем на YouTube...")
     upload_to_youtube(data)
