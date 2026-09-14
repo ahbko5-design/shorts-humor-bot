@@ -106,7 +106,7 @@ def get_local_pixar_images():
     if not os.path.exists(images_dir):
         os.makedirs(images_dir, exist_ok=True)
         
-    all_images = [os.path.join(images_dir, f) for f in os.listdir(images_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    all_images = [os.path.join(images_dir, f) for f in os.listdir(images_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.jfif'))]
     
     if len(all_images) >= 3:
         chosen = random.sample(all_images, 3)
