@@ -3,14 +3,19 @@ import json
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import google.generativeai as genai
-from moviepy import ImageClip, AudioFileClip, CompositeVideoClip
+from moviepy import ImageClip, AudioFileClip
 import numpy as np
+
+# Библиотеки для загрузки на YouTube через Google API
+import google.auth
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 DATA_FILE = 'paradoxes.json'
 OUTPUT_IMAGE = 'output.png'
 OUTPUT_VIDEO = 'output.mp4'
-# Путь к фоновой музыке (можно положить в репозиторий MP3-файл, например 'background.mp3')
-BACKGROUND_AUDIO = 'background.mp3' 
+BACKGROUND_AUDIO = 'background.mp3'
 
 def load_database():
     if not os.path.exists(DATA_FILE):
@@ -31,7 +36,6 @@ def get_todays_paradox():
     index = (day_of_year - 1) % len(data)
     paradox = data[index]
     
-    # Автогенерация нового парадокса, если база меньше 365 штук
     api_key = os.environ.get("GEMINI_API_KEY")
     if api_key and len(data) < 365:
         try:
@@ -99,23 +103,17 @@ def create_short_image(paradox):
     print(f"✅ Shorts card image created: {OUTPUT_IMAGE}")
 
 def create_video_with_audio():
-    # Длительность ролика под Shorts — 12 секунд
     duration = 12 
-    
-    # Создаем клип из картинки с использованием актуального метода with_duration
     image_clip = ImageClip(OUTPUT_IMAGE).with_duration(duration)
     
-    # Если в репозитории есть файл фоновой музыки, подмешиваем его
     if os.path.exists(BACKGROUND_AUDIO):
         audio_clip = AudioFileClip(BACKGROUND_AUDIO).subclip(0, duration)
-        # Приглушаем громкость музыки для фона
         audio_clip = audio_clip.volumex(0.3)
         video_clip = image_clip.set_audio(audio_clip)
     else:
-        print("⚠️ Файл background.mp3 не найден, видео будет без звука.")
+        print("⚠️ background.mp3 not found, generating video without audio.")
         video_clip = image_clip
 
-    # Экспортируем готовый файл видео
     video_clip.write_videofile(
         OUTPUT_VIDEO,
         fps=24,
@@ -123,10 +121,65 @@ def create_video_with_audio():
         audio_codec='aac',
         preset='veryfast'
     )
-    print(f"✅ Shorts video with music successfully generated: {OUTPUT_VIDEO}")
+    print(f"✅ Video generated: {OUTPUT_VIDEO}")
+
+def upload_to_youtube(title):
+    # Получаем токен из переменных окружения GitHub Secrets
+    token_json = os.environ.get("YOUTUBE_TOKEN")
+    client_secret_json = os.environ.get("CLIENT_SECRET_JSON")
+    
+    if not token_json:
+        raise ValueError("❌ Не найден YOUTUBE_TOKEN в секретах!")
+
+    # Восстанавливаем учетные данные для YouTube API
+    token_data = json.loads(token_json)
+    client_data = json.loads(client_secret_json) if client_secret_json else {}
+    
+    creds = Credentials(
+        token=token_data.get("token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=token_data.get("client_id", client_data.get("client_id")),
+        client_secret=token_data.get("client_secret", client_data.get("client_secret")),
+        scopes=["https://www.googleapis.com/auth/youtube.upload"]
+    )
+
+    youtube = build("youtube", "v3", credentials=creds)
+
+    # Параметры видео для Shorts
+    body = {
+        "snippet": {
+            "title": f"{title} #shorts #paradox",
+            "description": "Test your brain with this daily logic paradox! 🧠✨",
+            "tags": ["paradox", "logic", "shorts", "brainteaser"],
+            "categoryId": "27"  # Education
+        },
+        "status": {
+            "privacyStatus": "public",
+            "selfDeclaredMadeForKids": False
+        }
+    }
+
+    media = MediaFileUpload(OUTPUT_VIDEO, chunksize=-1, resumable=True)
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body=body,
+        media_body=media
+    )
+
+    response = None
+    print("🚀 Загрузка видео на YouTube...")
+    while response is None:
+        status, response = request.next_chunk()
+        if status:
+            print(f"Загрузка: {int(status.progress() * 100)}%")
+
+    print(f"🎉 Успешно загружено! ID видео: {response.get('id')}")
 
 if __name__ == "__main__":
     paradox = get_todays_paradox()
     print(f"Today's paradox: {paradox['title']}")
+    
     create_short_image(paradox)
     create_video_with_audio()
+    upload_to_youtube(paradox['title'])
