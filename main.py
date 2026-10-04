@@ -30,12 +30,19 @@ def get_todays_paradox():
     if not data:
         data = [{"id": 1, "title": "Paradox", "question": "What came first?", "answer": "Nobody knows."}]
     
-    day_of_year = datetime.now().timetuple().tm_yday
-    index = (day_of_year - 1) % len(data)
-    paradox = data[index]
+    # Берем самый первый элемент из списка (текущий)
+    paradox = data[0]
     
+    # Удаляем его из базы, чтобы завтра он уже не повторился, 
+    # и перемещаем в конец (или просто отрезаем)
+    if len(data) > 1:
+        data.pop(0)  # Убираем уже опубликованный
+        data.append(paradox)  # Отправляем в самый конец очереди
+        save_database(data)
+    
+    # Автогенерация нового парадокса через API, если в базе меньше 30 штук в запасе
     api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key and len(data) < 365:
+    if api_key and len(data) < 30:
         try:
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel("gemini-2.5-flash")
@@ -45,7 +52,7 @@ def get_todays_paradox():
             new_item["id"] = len(data) + 1
             data.append(new_item)
             save_database(data)
-            print(f"✨ New paradox generated and added: {new_item['title']}")
+            print(f"✨ New paradox generated and added to queue: {new_item['title']}")
         except Exception as e:
             print(f"Failed to auto-generate new paradox via API: {e}")
             
