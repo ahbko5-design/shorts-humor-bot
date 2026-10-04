@@ -51,15 +51,38 @@ def get_todays_paradox():
             
     return paradox
 
+import random
+
 def draw_slide(title, question, answer=None, filename="slide.png"):
     width, height = 1080, 1920
-    # Глубокий премиальный темный фон
-    image = Image.new("RGB", (width, height), color="#0B0D13")
+    
+    # 1. Генерируем красивый абстрактный киберпанк-фон
+    image = Image.new("RGB", (width, height), color="#07090E")
     draw = ImageDraw.Draw(image)
     
+    # Рисуем абстрактные светящиеся сферы / градиентные пятна для глубины
+    for _ in range(6):
+        rx = random.randint(0, width)
+        ry = random.randint(0, height)
+        r = random.randint(300, 700)
+        # Полупрозрачные неоновые блики (зеленоватые и синеватые)
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        d_layer = ImageDraw.Draw(layer)
+        d_layer.ellipse([rx - r, ry - r, rx + r, ry + r], fill=(0, 255, 102, 8))
+        image = Image.alpha_composite(image.convert("RGBA"), layer).convert("RGB")
+    
+    draw = ImageDraw.Draw(image)
+    
+    # Рисуем тонкую футуристичную сетку на фоне
+    grid_step = 120
+    for x in range(0, width, grid_step):
+        draw.line([(x, 0), (x, height)], fill="#111622", width=1)
+    for y in range(0, height, grid_step):
+        draw.line([(0, y), (width, y)], fill="#111622", width=1)
+
     try:
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
-        font_body = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 44)
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 50)
+        font_body = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 42)
     except:
         font_title = ImageFont.load_default()
         font_body = ImageFont.load_default()
@@ -82,51 +105,53 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
         return lines
 
     max_text_width = width - 160
-
-    # 1. Плашка-шапка для заголовка (делает дизайн дорогим и структурированным)
+    start_y = 280  # Безопасная зона сверху
+    
     title_lines = wrap_text(title.upper(), font_title, max_text_width - 60)
+    header_box_height = len(title_lines) * 60 + 50
     
-    # Рисуем красивую неоновую рамку сверху для заголовка
-    header_box_height = len(title_lines) * 65 + 60
-    draw.rounded_rectangle([80, 140, width - 80, 140 + header_box_height], radius=20, fill="#151922", outline="#00FF66", width=2)
+    # Полупрозрачные плашки для текста (чтобы они красиво выделялись на абстрактном фоне)
+    draw.rounded_rectangle([80, start_y, width - 80, start_y + header_box_height], radius=20, fill="#0F131D", outline="#00FF66", width=2)
     
-    y = 140 + 30
+    y = start_y + 25
     for line in title_lines:
         bbox = draw.textbbox((0, 0), line, font=font_title)
         w = bbox[2] - bbox[0]
         draw.text(((width - w) / 2, y), line, fill="#00FF66", font=font_title)
-        y += 65
-
-    # 2. Блок с вопросом (в центре экрана, безопасная зона от правых кнопок YouTube)
-    q_lines = wrap_text(question, font_body, max_text_width - 60)
-    q_box_height = len(q_lines) * 60 + 80
-    q_box_top = 140 + header_box_height + 40
-    
-    draw.rounded_rectangle([80, q_box_top, width - 80, q_box_top + q_box_height], radius=20, fill="#131720", outline="#2A3245", width=2)
-    
-    y = q_box_top + 40
-    for line in q_lines:
-        draw.text((110, y), line, fill="#FFFFFF", font=font_body)
         y += 60
 
-    # 3. Если передан ответ — рисуем блок ответа ниже
+    # Блок с вопросом
+    q_lines = wrap_text(question, font_body, max_text_width - 60)
+    q_box_height = len(q_lines) * 55 + 60
+    q_box_top = start_y + header_box_height + 40
+    
+    draw.rounded_rectangle([80, q_box_top, width - 80, q_box_top + q_box_height], radius=20, fill="#0D111A", outline="#222B3E", width=2)
+    
+    y = q_box_top + 30
+    for line in q_lines:
+        draw.text((110, y), line, fill="#FFFFFF", font=font_body)
+        y += 55
+
+    # Блок ответа (если передан)
     if answer:
         ans_lines = wrap_text(answer, font_body, max_text_width - 60)
-        ans_box_height = len(ans_lines) * 60 + 100
-        ans_box_top = q_box_top + q_box_height + 40
+        ans_box_height = len(ans_lines) * 55 + 90
+        ans_box_top = q_box_top + q_box_height + 30
         
-        draw.rounded_rectangle([80, ans_box_top, width - 80, ans_box_top + ans_box_height], radius=20, fill="#1A131C", outline="#FF3366", width=2)
+        draw.rounded_rectangle([80, ans_box_top, width - 80, ans_box_top + ans_box_height], radius=20, fill="#160E14", outline="#FF3366", width=2)
         
-        # Метка ANSWER
-        draw.text((110, ans_box_top + 25), "💡 ANSWER:", fill="#FF3366", font=font_title)
+        draw.text((110, ans_box_top + 20), "💡 ANSWER:", fill="#FF3366", font=font_title)
         
-        y = ans_box_top + 95
+        y = ans_box_top + 80
         for line in ans_lines:
             draw.text((110, y), line, fill="#E2E8F0", font=font_body)
-            y += 60
-
-    # Футер / Бренд канала внизу
-    draw.text((width / 2 - 120, height - 100), "🧩 Paradox Lab", fill="#64748B", font=font_body)
+            y += 55
+        
+        draw.text((width / 2 - 140, height - 160), "✨ SOLUTION UNLOCKED", fill="#FF3366", font=font_body)
+    else:
+        # Таймер / плашка ожидания для первой части
+        draw.rounded_rectangle([80, height - 200, width - 80, height - 140], radius=15, fill="#0F131D", outline="#00FF66", width=1)
+        draw.text((width / 2 - 180, height - 185), "⏳ THINK... ANSWER SOON", fill="#00FF66", font=font_body)
 
     image.save(filename)
 
