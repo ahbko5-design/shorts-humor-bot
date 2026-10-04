@@ -1,62 +1,62 @@
 [
   {
     "id": 1,
-    "title": "Парадокс заключенного",
-    "question": "Димку и Санька поймали. Если оба молчат — срок по 1 году. Если один сдает другого — он на свободе, а второй сидит 10 лет. Что выгоднее?",
-    "answer": "Математически — предать. Но если оба мыслят логично, оба предают и получают по 5 лет. Идеальный тупик эгоизма."
+    "title": "The Prisoner's Dilemma",
+    "question": "Two criminals are caught. If both stay silent, they get 1 year each. If one betrays the other, he goes free while the second gets 10 years. What's the best move?",
+    "answer": "Mathematically, betrayal is rational. But if both think logically, they both betray and get 5 years. The ultimate trap of selfishness."
   },
   {
     "id": 2,
-    "title": "Корабль Тесея",
-    "question": "Каждый год в старом деревянном корабле меняют по одной доске. Через 10 лет не осталось ни одной старой детали. Это тот же корабль?",
-    "answer": "Философский тупик: если собрать старые доски обратно — какой из кораблей настоящий?"
+    "title": "Ship of Theseus",
+    "question": "Over the years, every single wooden plank on a ship is replaced. After 10 years, not a single original part remains. Is it still the same ship?",
+    "answer": "A philosophical paradox: if you rebuild a ship out of all the discarded old planks, which one is the real ship?"
   },
   {
     "id": 3,
-    "title": "Парадокс дней рождения",
-    "question": "Сколько нужно человек в комнате, чтобы вероятность совпадения дней рождения у двоих была больше 50%?",
-    "answer": "Всего 23 человека! Наш мозг интуитивно ждет цифру за 150, но математика комбинаторики безжалостна."
+    "title": "The Birthday Paradox",
+    "question": "How many people need to be in a room for the probability of two people sharing a birthday to be greater than 50%?",
+    "answer": "Only 23 people! Our intuition expects a number closer to 150, but combinatorics is merciless."
   },
   {
     "id": 4,
-    "title": "Ловушка Ахиллеса",
-    "question": "Быстрейший Ахиллес никогда не догонит черепаху, если та начнет движение чуть впереди? Ведь пока он бежит к ней, она смещается.",
-    "answer": "Ахиллес догонит: бесконечная сумма убывающих отрезков времени дает вполне конечный результат."
+    "title": "Achilles and the Tortoise",
+    "question": "Can the fastest runner, Achilles, ever overtake a slow tortoise if it gets a small head start? By the time he reaches its spot, it has moved further.",
+    "answer": "Yes, he catches it: an infinite sum of decreasing time intervals converges to a finite total time."
   },
   {
     "id": 5,
-    "title": "Парадокс дедушки",
-    "question": "Если ты вернешься в прошлое и случайно помешаешь знакомству своих бабушки и дедушки, ты не родишься. Но тогда кто вернулся в прошлое?",
-    "answer": "Классическая петля времени. Наука до сих пор спорит, запрещает ли физика путешествия во времени из-за этого."
+    "title": "The Grandfather Paradox",
+    "question": "If you travel back in time and accidentally stop your grandparents from meeting, you won't be born. But then who traveled back in time?",
+    "answer": "A classic time loop. Physics still debates whether time travel inherently prevents such paradoxes."
   },
   {
     "id": 6,
-    "title": "Парадокс лжеца",
-    "question": "Человек говорит: «Всё, что я произношу — ложь». Если это правда, то он соврал. Если это ложь, то он сказал правду. Как так?",
-    "answer": "Классический лингвистический тупик, ломающий формальную логику и делящий языки программирования на типы."
+    "title": "The Liar Paradox",
+    "question": "A man says: 'Everything I say is a lie.' If it's true, he lied. If it's false, he told the truth. How is that possible?",
+    "answer": "A classic linguistic deadlock that breaks formal logic and forces programming languages to handle type errors."
   },
   {
     "id": 7,
-    "title": "Парадокс кучи",
-    "question": "Если из кучи песка убирать по одной песчинке, в какой момент она перестает быть кучей? Одна песчинка — это же не куча?",
-    "answer": "Это софит неопределенности: наш язык полон размытых понятий, где грань между «много» и «мало» размыта."
+    "title": "The Heap Paradox (Sorites)",
+    "question": "If you remove one grain of sand at a time from a pile, at what exact point does it stop being a 'pile'? Is one grain a pile?",
+    "answer": "It's the fallacy of vagueness: human language is full of blurry concepts where boundaries don't cleanly exist."
   },
   {
     "id": 8,
-    "title": "Дилемма всемогущества",
-    "question": "Может ли всемогущий бог создать камень, который сам не сможет поднять?",
-    "answer": "Классический парадокс логики: если может — он не всемогущий, если не может — тоже не всемогущий."
+    "title": "The Omnipotence Paradox",
+    "question": "Can an all-powerful being create a stone so heavy that even they cannot lift it?",
+    "answer": "A pure logical trap: if they can create it, they aren't omnipotent; if they can't, they aren't omnipotent either."
   },
   {
     "id": 9,
-    "title": "Парадокс Монти Холла",
-    "question": "В шоу три двери: за одной авто, за двумя — козы. Ты выбрал дверь №1. Ведущий открывает дверь №3 с козой и предлагает сменить выбор. Стоит ли?",
-    "answer": "Обязательно! Шанс выиграть авто вырастает ровно в 2 раза (с 1/3 до 2/3)."
+    "title": "The Monty Hall Problem",
+    "question": "Three doors: a car behind one, goats behind two. You pick Door 1. The host opens Door 3 to reveal a goat and asks if you want to switch. Should you?",
+    "answer": "Always switch! Your chance of winning the car instantly doubles from 1/3 to 2/3."
   },
   {
     "id": 10,
-    "title": "Парадокс кота Шредингера",
-    "question": "Кот в закрытой коробке одновременно жив и мертв, пока мы ее не откроем. Но неужели реальность зависит от наблюдателя?",
-    "answer": "В квантовой физике — да, волновая функция схлопывается только в момент измерения."
+    "title": "Schrödinger's Cat",
+    "question": "A cat in a sealed box is simultaneously alive and dead until opened. Does reality genuinely depend on being observed?",
+    "answer": "In quantum mechanics, yes — the wave function only collapses at the moment of measurement."
   }
 ]
