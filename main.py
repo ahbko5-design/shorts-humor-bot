@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import google.generativeai as genai
-from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
+from moviepy import ImageClip, AudioFileClip, CompositeVideoClip
 import numpy as np
 
 DATA_FILE = 'paradoxes.json'
