@@ -99,20 +99,20 @@ def create_short_image(paradox):
     print(f"✅ Shorts card image created: {OUTPUT_IMAGE}")
 
 def create_video_with_audio():
-    # Длительность ролика под Shorts — 12 секунд (оптимально для чтения текста)
+    # Длительность ролика под Shorts — 12 секунд
     duration = 12 
     
-    # Создаем клип из картинки
-    image_clip = ImageClip(OUTPUT_IMAGE).set_duration(duration)
+    # Создаем клип из картинки с использованием актуального метода with_duration
+    image_clip = ImageClip(OUTPUT_IMAGE).with_duration(duration)
     
     # Если в репозитории есть файл фоновой музыки, подмешиваем его
     if os.path.exists(BACKGROUND_AUDIO):
         audio_clip = AudioFileClip(BACKGROUND_AUDIO).subclip(0, duration)
-        # Немного приглушаем громкость музыки, чтобы она была фоновой
+        # Приглушаем громкость музыки для фона
         audio_clip = audio_clip.volumex(0.3)
         video_clip = image_clip.set_audio(audio_clip)
     else:
-        print("⚠️ Файл background.mp3 не найден, видео будет без звука. Добавь MP3 в репозиторий, если нужна музыка!")
+        print("⚠️ Файл background.mp3 не найден, видео будет без звука.")
         video_clip = image_clip
 
     # Экспортируем готовый файл видео
