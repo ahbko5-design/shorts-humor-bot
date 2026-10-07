@@ -1,5 +1,9 @@
 import os
 import json
+import time
+import random
+import urllib.request
+import subprocess
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import google.generativeai as genai
@@ -10,6 +14,7 @@ import google.auth
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
 DATA_FILE = 'paradoxes.json'
 OUTPUT_VIDEO = 'output.mp4'
@@ -30,17 +35,16 @@ def get_todays_paradox():
     if not data:
         data = [{"id": 1, "title": "Paradox", "question": "What came first?", "answer": "Nobody knows."}]
     
-    # Берем самый первый элемент из списка (текущий)
+    # Берем первый элемент очереди
     paradox = data[0]
     
-    # Удаляем его из базы, чтобы завтра он уже не повторился, 
-    # и перемещаем в конец (или просто отрезаем)
+    # Сдвигаем его в конец, чтобы контент не повторялся
     if len(data) > 1:
-        data.pop(0)  # Убираем уже опубликованный
-        data.append(paradox)  # Отправляем в самый конец очереди
+        data.pop(0)
+        data.append(paradox)
         save_database(data)
     
-    # Автогенерация нового парадокса через API, если в базе меньше 30 штук в запасе
+    # Автогенерация через Gemini с защитой от превышения квоты (Free Tier)
     api_key = os.environ.get("GEMINI_API_KEY")
     if api_key and len(data) < 30:
         try:
@@ -52,27 +56,33 @@ def get_todays_paradox():
             new_item["id"] = len(data) + 1
             data.append(new_item)
             save_database(data)
-            print(f"✨ New paradox generated and added to queue: {new_item['title']}")
+            print(f"✨ New paradox generated: {new_item['title']}")
         except Exception as e:
-            print(f"Failed to auto-generate new paradox via API: {e}")
+            print(f"⚠️ API Quota limit or error (skipping auto-generation safely): {e}")
             
     return paradox
 
-import random
+def ensure_background_audio():
+    if not os.path.exists(BACKGROUND_AUDIO):
+        print("📥 Скачивание фоновой музыки...")
+        try:
+            audio_url = "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf756.mp3?filename=cyberpunk-luci-103357.mp3"
+            urllib.request.urlretrieve(audio_url, BACKGROUND_AUDIO)
+            print("✅ Фоновая музыка успешно загружена!")
+        except Exception as e:
+            print(f"⚠️ Не удалось скачать музыку: {e}")
 
 def draw_slide(title, question, answer=None, filename="slide.png"):
     width, height = 1080, 1920
     
-    # 1. Генерируем красивый абстрактный киберпанк-фон
     image = Image.new("RGB", (width, height), color="#07090E")
     draw = ImageDraw.Draw(image)
     
-    # Рисуем абстрактные светящиеся сферы / градиентные пятна для глубины
+    # Абстрактные световые пятна для глубины фона
     for _ in range(6):
         rx = random.randint(0, width)
         ry = random.randint(0, height)
         r = random.randint(300, 700)
-        # Полупрозрачные неоновые блики (зеленоватые и синеватые)
         layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         d_layer = ImageDraw.Draw(layer)
         d_layer.ellipse([rx - r, ry - r, rx + r, ry + r], fill=(0, 255, 102, 8))
@@ -80,7 +90,7 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
     
     draw = ImageDraw.Draw(image)
     
-    # Рисуем тонкую футуристичную сетку на фоне
+    # Тонкая техно-сетка
     grid_step = 120
     for x in range(0, width, grid_step):
         draw.line([(x, 0), (x, height)], fill="#111622", width=1)
@@ -117,7 +127,6 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
     title_lines = wrap_text(title.upper(), font_title, max_text_width - 60)
     header_box_height = len(title_lines) * 60 + 50
     
-    # Полупрозрачные плашки для текста (чтобы они красиво выделялись на абстрактном фоне)
     draw.rounded_rectangle([80, start_y, width - 80, start_y + header_box_height], radius=20, fill="#0F131D", outline="#00FF66", width=2)
     
     y = start_y + 25
@@ -127,7 +136,6 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
         draw.text(((width - w) / 2, y), line, fill="#00FF66", font=font_title)
         y += 60
 
-    # Блок с вопросом
     q_lines = wrap_text(question, font_body, max_text_width - 60)
     q_box_height = len(q_lines) * 55 + 60
     q_box_top = start_y + header_box_height + 40
@@ -139,7 +147,6 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
         draw.text((110, y), line, fill="#FFFFFF", font=font_body)
         y += 55
 
-    # Блок ответа (если передан)
     if answer:
         ans_lines = wrap_text(answer, font_body, max_text_width - 60)
         ans_box_height = len(ans_lines) * 55 + 90
@@ -156,7 +163,6 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
         
         draw.text((width / 2 - 140, height - 160), "✨ SOLUTION UNLOCKED", fill="#FF3366", font=font_body)
     else:
-        # Таймер / плашка ожидания для первой части
         draw.rounded_rectangle([80, height - 200, width - 80, height - 140], radius=15, fill="#0F131D", outline="#00FF66", width=1)
         draw.text((width / 2 - 180, height - 185), "⏳ THINK... ANSWER SOON", fill="#00FF66", font=font_body)
 
@@ -164,9 +170,8 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
 
 def create_dynamic_video(paradox):
     duration = 14
-    split_time = 9.0  # 9 секунд зритель думает над загадкой, последние 5 секунд видит ответ
+    split_time = 9.0
 
-    # Генерируем два красивых кадра
     draw_slide(paradox["title"], paradox["question"], answer=None, filename="slide1.png")
     draw_slide(paradox["title"], paradox["question"], answer=paradox["answer"], filename="slide2.png")
 
@@ -186,7 +191,7 @@ def create_dynamic_video(paradox):
         audio_codec='aac',
         preset='veryfast'
     )
-    print(f"✅ Стильное видео с таймингом создано: {OUTPUT_VIDEO}")
+    print(f"✅ Video created successfully: {OUTPUT_VIDEO}")
 
 def upload_to_youtube(title):
     token_json = os.environ.get("YOUTUBE_TOKEN")
@@ -222,25 +227,54 @@ def upload_to_youtube(title):
         }
     }
 
-    media = MediaFileUpload(OUTPUT_VIDEO, chunksize=-1, resumable=True)
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=media
-    )
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            media = MediaFileUpload(OUTPUT_VIDEO, chunksize=-1, resumable=True)
+            request = youtube.videos().insert(
+                part="snippet,status",
+                body=body,
+                media_body=media
+            )
 
-    response = None
-    print("🚀 Загрузка стильного шортса...")
-    while response is None:
-        status, response = request.next_chunk()
-        if status:
-            print(f"Загрузка: {int(status.progress() * 100)}%")
+            response = None
+            print(f"🚀 Загрузка на YouTube (попытка {attempt + 1})...")
+            while response is None:
+                status, response = request.next_chunk()
+                if status:
+                    print(f"Загрузка: {int(status.progress() * 100)}%")
 
-    print(f"🎉 Успешно опубликовано! ID видео: {response.get('id')}")
+            print(f"🎉 Успешно опубликовано! ID видео: {response.get('id')}")
+            return
+        except HttpError as e:
+            print(f"⚠️ Ошибка YouTube API при попытке {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                print("⏳ Ждем 5 секунд и повторяем...")
+                time.sleep(5)
+            else:
+                raise e
+
+def commit_and_push_progress():
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", DATA_FILE], check=True)
+        
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
+        if status.stdout.strip():
+            subprocess.run(["git", "commit", "-m", "🔄 Update paradoxes queue [skip ci]"], check=True)
+            subprocess.run(["git", "push"], check=True)
+            print("✅ Очередь парадоксов успешно обновлена в репозитории!")
+        else:
+            print("ℹ️ Нет изменений в базе данных для коммита.")
+    except Exception as e:
+        print(f"⚠️ Не удалось отправить изменения базы в git: {e}")
 
 if __name__ == "__main__":
     paradox = get_todays_paradox()
     print(f"Today's paradox: {paradox['title']}")
     
+    ensure_background_audio()
     create_dynamic_video(paradox)
     upload_to_youtube(paradox['title'])
+    commit_and_push_progress()
