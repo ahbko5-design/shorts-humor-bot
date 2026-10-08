@@ -3,7 +3,6 @@ import json
 import time
 import random
 import urllib.request
-from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import google.generativeai as genai
 from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
@@ -15,49 +14,65 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
-DATA_FILE = 'paradoxes.json'
+HISTORY_FILE = 'history.txt'
 OUTPUT_VIDEO = 'output.mp4'
 BACKGROUND_AUDIO = 'background.mp3'
 
-def load_database():
-    if not os.path.exists(DATA_FILE):
+def load_history():
+    if not os.path.exists(HISTORY_FILE):
         return []
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+        return [line.strip() for line in f.readlines() if line.strip()]
 
-def save_database(data):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+def save_to_history(title):
+    with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
+        f.write(title + "\n")
 
-def get_todays_paradox():
-    data = load_database()
-    if not data:
-        data = [{"id": 1, "title": "Paradox", "question": "What came first?", "answer": "Nobody knows."}]
-    
-    # Вычисляем индекс на основе текущего дня года — контент будет меняться автоматически и без повторов
-    day_of_year = datetime.now().timetuple().tm_yday
-    index = (day_of_year - 1) % len(data)
-    paradox = data[index]
-    
-    print(f"📅 День года: {day_of_year}, выбран парадокс с индексом {index}: {paradox['title']}")
-    
-    # Автогенерация через Gemini, если база мала
+def generate_unique_paradox():
     api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key and len(data) < 30:
+    if not api_key:
+        raise ValueError("❌ Не найден GEMINI_API_KEY в секретах!")
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    
+    history = load_history()
+    avoid_list = ", ".join(history[-20:]) if history else "none"
+
+    prompt = f"""
+    Create a new, unique, short philosophical or scientific paradox in English. 
+    It must NOT be any of these recently used topics: [{avoid_list}].
+    Return the result STRICTLY as a JSON object without any markdown wrapping, using this exact format: 
+    {{"title": "Title", "question": "The mystery question", "answer": "Short answer"}}
+    """
+
+    for attempt in range(3):
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            prompt = "Create a new, unique, short philosophical or scientific paradox in English. Return the result STRICTLY as a JSON object without any markdown wrapping: {\"title\": \"Title\", \"question\": \"The mystery question\", \"answer\": \"Short answer\"}"
             response = model.generate_content(prompt)
-            new_item = json.loads(response.text.strip())
-            new_item["id"] = len(data) + 1
-            data.append(new_item)
-            save_database(data)
-            print(f"✨ Новый парадокс сгенерирован и добавлен в базу: {new_item['title']}")
-        except Exception as e:
-            print(f"⚠️ Ошибка API (пропускаем автогенерацию): {e}")
+            text = response.text.strip()
+            # Очищаем от возможных маркдаун-оберток если модель их добавила
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            text = text.strip()
             
-    return paradox
+            paradox = json.loads(text)
+            title = paradox.get("title")
+            
+            if title and title not in history:
+                save_to_history(title)
+                print(f"✨ Сгенерирован новый уникальный парадокс: {title}")
+                return paradox
+        except Exception as e:
+            print(f"⚠️ Попытка генерации {attempt + 1} не удалась: {e}")
+            
+    # Запасной вариант, если API затупит
+    return {
+        "title": f"The Quantum Observer Paradox #{random.randint(100, 999)}",
+        "question": "Does the universe exist when nobody is looking at it?",
+        "answer": "Quantum mechanics suggests observation collapses wavefunctions into reality."
+    }
 
 def ensure_background_audio():
     if not os.path.exists(BACKGROUND_AUDIO):
@@ -75,7 +90,6 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
     image = Image.new("RGB", (width, height), color="#07090E")
     draw = ImageDraw.Draw(image)
     
-    # Абстрактные световые пятна для глубины фона
     for _ in range(6):
         rx = random.randint(0, width)
         ry = random.randint(0, height)
@@ -87,7 +101,6 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
     
     draw = ImageDraw.Draw(image)
     
-    # Тонкая техно-сетка
     grid_step = 120
     for x in range(0, width, grid_step):
         draw.line([(x, 0), (x, height)], fill="#111622", width=1)
@@ -119,7 +132,7 @@ def draw_slide(title, question, answer=None, filename="slide.png"):
         return lines
 
     max_text_width = width - 160
-    start_y = 280  # Безопасная зона сверху
+    start_y = 280
     
     title_lines = wrap_text(title.upper(), font_title, max_text_width - 60)
     header_box_height = len(title_lines) * 60 + 50
@@ -252,7 +265,7 @@ def upload_to_youtube(title):
                 raise e
 
 if __name__ == "__main__":
-    paradox = get_todays_paradox()
+    paradox = generate_unique_paradox()
     print(f"Today's paradox: {paradox['title']}")
     
     ensure_background_audio()
