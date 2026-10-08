@@ -3,7 +3,6 @@ import json
 import time
 import random
 import urllib.request
-import subprocess
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import google.generativeai as genai
@@ -35,16 +34,14 @@ def get_todays_paradox():
     if not data:
         data = [{"id": 1, "title": "Paradox", "question": "What came first?", "answer": "Nobody knows."}]
     
-    # Берем первый элемент очереди
-    paradox = data[0]
+    # Вычисляем индекс на основе текущего дня года — контент будет меняться автоматически и без повторов
+    day_of_year = datetime.now().timetuple().tm_yday
+    index = (day_of_year - 1) % len(data)
+    paradox = data[index]
     
-    # Сдвигаем его в конец, чтобы контент не повторялся
-    if len(data) > 1:
-        data.pop(0)
-        data.append(paradox)
-        save_database(data)
+    print(f"📅 День года: {day_of_year}, выбран парадокс с индексом {index}: {paradox['title']}")
     
-    # Автогенерация через Gemini с защитой от превышения квоты (Free Tier)
+    # Автогенерация через Gemini, если база мала
     api_key = os.environ.get("GEMINI_API_KEY")
     if api_key and len(data) < 30:
         try:
@@ -56,9 +53,9 @@ def get_todays_paradox():
             new_item["id"] = len(data) + 1
             data.append(new_item)
             save_database(data)
-            print(f"✨ New paradox generated: {new_item['title']}")
+            print(f"✨ Новый парадокс сгенерирован и добавлен в базу: {new_item['title']}")
         except Exception as e:
-            print(f"⚠️ API Quota limit or error (skipping auto-generation safely): {e}")
+            print(f"⚠️ Ошибка API (пропускаем автогенерацию): {e}")
             
     return paradox
 
@@ -254,22 +251,6 @@ def upload_to_youtube(title):
             else:
                 raise e
 
-def commit_and_push_progress():
-    try:
-        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
-        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", DATA_FILE], check=True)
-        
-        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
-        if status.stdout.strip():
-            subprocess.run(["git", "commit", "-m", "🔄 Update paradoxes queue [skip ci]"], check=True)
-            subprocess.run(["git", "push"], check=True)
-            print("✅ Очередь парадоксов успешно обновлена в репозитории!")
-        else:
-            print("ℹ️ Нет изменений в базе данных для коммита.")
-    except Exception as e:
-        print(f"⚠️ Не удалось отправить изменения базы в git: {e}")
-
 if __name__ == "__main__":
     paradox = get_todays_paradox()
     print(f"Today's paradox: {paradox['title']}")
@@ -277,4 +258,3 @@ if __name__ == "__main__":
     ensure_background_audio()
     create_dynamic_video(paradox)
     upload_to_youtube(paradox['title'])
-    commit_and_push_progress()
